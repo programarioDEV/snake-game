@@ -35,6 +35,19 @@ class MatchConfig:
     initial_length: int = 4
     max_ticks: int = 5000
     seed: int = 0
+    stall_ticks: int | None = None
+    detect_cycles: bool = True
+
+    def __post_init__(self) -> None:
+        if self.stall_ticks is not None and self.stall_ticks < 1:
+            raise ValueError("stall_ticks must be at least 1")
+
+    @property
+    def max_stall_ticks(self) -> int:
+        """Ticks in a row without anyone eating before a stalemate: explicit, or 1.5x the board area."""
+        if self.stall_ticks is not None:
+            return self.stall_ticks
+        return int(self.width * self.height * 1.5)
 
     def build_grid(self) -> Grid:
         probe = Grid(self.width, self.height)

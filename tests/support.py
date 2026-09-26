@@ -1,4 +1,12 @@
-from snake_arena.core import Direction, Grid, Snake, SnakeId
+from snake_arena.agents import BaseAgent, Decision
+from snake_arena.core import Direction, GameState, Grid, Snake, SnakeId
+
+
+class Circler(BaseAgent):
+    """Turns clockwise every tick: a length-4 snake settles into a 2x2 loop chasing its own tail."""
+
+    def decide(self, state: GameState, me: SnakeId) -> Decision:
+        return Decision(Direction((state.snake(me).direction + 1) % 4))
 
 
 def make_snake(

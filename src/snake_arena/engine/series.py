@@ -4,7 +4,7 @@ from collections import Counter
 
 from ..agents import TacticalMode
 from ..core import CollisionType, SnakeId
-from .simulation import AgentStats, MatchSummary, SimulationEngine
+from .simulation import AgentStats, GameResult, MatchSummary, SimulationEngine
 
 
 class SeriesStats:
@@ -16,6 +16,7 @@ class SeriesStats:
         self.total_ticks = 0
         self.wins: Counter[SnakeId] = Counter()
         self.deaths: Counter[tuple[SnakeId, CollisionType]] = Counter()
+        self.endings: Counter[GameResult] = Counter()
         self.length_totals = [0] * players
         self.agents = [AgentStats() for _ in range(players)]
         self.results: list[SnakeId | None] = []
@@ -24,6 +25,8 @@ class SeriesStats:
         self.matches += 1
         self.total_ticks += summary.ticks
         self.results.append(summary.winner)
+        if summary.ending is not None:
+            self.endings[summary.ending] += 1
         if summary.winner is None:
             self.draws += 1
         else:

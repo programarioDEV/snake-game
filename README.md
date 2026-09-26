@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 ![pygame-ce](https://img.shields.io/badge/pygame--ce-2.5-00A86B)
-![pytest](https://img.shields.io/badge/pytest-105%2F105%20passing-2EA44F?logo=pytest&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-117%2F117%20passing-2EA44F?logo=pytest&logoColor=white)
 ![mypy](https://img.shields.io/badge/mypy-strict-2A6DB2)
 
 **English** · [Español](README.es.md)
@@ -35,66 +35,66 @@ The core idea of the project is **algorithmic explainability**. Every tick, the 
 
 Dependencies always point toward the core. `core` imports nothing from the project. `pygame` only appears in `view/` and `record/`, which reuses the same `SceneRenderer` to draw off-screen frames. Pillow and imageio-ffmpeg are optional and only load when exporting.
 
+```mermaid
+flowchart TB
+    subgraph FRONT["window and video"]
+        direction LR
+        RECORD["<b>record/</b> · headless<br/>MatchRecorder<br/>GifWriter · Mp4Writer"]
+        VIEW["<b>view/</b> · pygame-ce<br/>ArenaApp · SceneRenderer<br/>board · HUD · scoreboard"]
+        RECORD -->|"reuses SceneRenderer"| VIEW
+    end
+    ENGINE["<b>engine/</b> · no pygame<br/>SimulationEngine<br/>MatchSeries · SeriesStats<br/>loop/stall draw rules"]
+    AGENTS["<b>agents/</b> · Strategy<br/>AggressiveAI (utilities)<br/>HumanController · Greedy"]
+    ANALYSIS["<b>analysis/</b> · stateless<br/>temporal BFS · Voronoi<br/>weighted A* · Tarjan"]
+    CORE["<b>core/</b> · pure<br/>Grid · Snake · GameState<br/>rules.step · spawn_food"]
+
+    FRONT -->|"tick() · reads TickRecord"| ENGINE
+    ENGINE -->|"decide(state, id)"| AGENTS
+    AGENTS -.->|"Decision"| ENGINE
+    AGENTS -->|"features"| ANALYSIS
+    AGENTS -->|"reads GameState"| CORE
+    ANALYSIS --> CORE
+    ENGINE -->|"step · spawn_food"| CORE
+
+    classDef core fill:#161b26,stroke:#8b949e,color:#e6edf3,stroke-width:2px
+    classDef analysis fill:#161b26,stroke:#b48cff,color:#e6edf3,stroke-width:2px
+    classDef agents fill:#161b26,stroke:#ff5866,color:#e6edf3,stroke-width:2px
+    classDef engine fill:#161b26,stroke:#4da3ff,color:#e6edf3,stroke-width:2px
+    classDef front fill:#161b26,stroke:#3fb68b,color:#e6edf3,stroke-width:2px
+    class CORE core
+    class ANALYSIS analysis
+    class AGENTS agents
+    class ENGINE engine
+    class VIEW,RECORD front
+    style FRONT fill:none,stroke:#3fb68b,stroke-width:1px,stroke-dasharray:5 4
 ```
-+--------------------------------------------------------------------------------+
-|                               snake_arena                                      |
-|                                                                                |
-|   +---------------------+        +----------------------+                      |
-|   |   core/  (pure)     |<-------|  analysis/           |                      |
-|   |---------------------|        |----------------------|                      |
-|   | Grid  Snake         |        | release_times        |                      |
-|   | GameState (frozen)  |        | reach_times  voronoi |                      |
-|   | rules.step()        |        | astar  Tarjan        |                      |
-|   | spawn_food(rng)     |        +----------------------+                      |
-|   +---------------------+                   ^                                  |
-|        ^          ^                         | features                         |
-|        |          |                +----------------------+                    |
-|        |          +----------------|  agents/ (Strategy)  |                    |
-|        |           GameState       |----------------------|                    |
-|        |           (read-only)     | BaseAgent            |                    |
-|        |                           | AggressiveAI (Utility|                    |
-|   +---------------------+          |   + perception)      |                    |
-|   | engine/             |--------->| HumanController      |                    |
-|   |---------------------| decide() | GreedyAgent          |                    |
-|   | SimulationEngine    |<---------+----------------------+                    |
-|   | deterministic tick  | Decision{direction, trace}                           |
-|   | per-agent metrics   |                                                      |
-|   | MatchSeries         |  chained rounds, re-seed, post-match pause           |
-|   | SeriesStats         |  scoreboard (shared with the benchmark)              |
-|   +---------------------+                                                      |
-|        |                                                                       |
-|        | TickRecord{state, decisions, compute_ms, tick_ms}   (read-only)       |
-|        v                                                                       |
-|   +------------------------------------------------------+                     |
-|   | view/  (pygame-ce)                                   |                     |
-|   | SceneRenderer: board + banner + HUD (+ series)       |<------+             |
-|   | BoardRenderer: cached alpha layers + overlays        |       |             |
-|   | HudPanel: focused agent's reasoning [1]/[2]          |       |             |
-|   | SeriesPanel: score, tactics, recent results          |       |             |
-|   | ArenaApp: window, fixed tick decoupled from FPS      |       |             |
-|   +------------------------------------------------------+       |             |
-|                                                                  |             |
-|   +------------------------------------------------------+       |             |
-|   | record/  (headless)                                  |-------+             |
-|   | MatchRecorder: off-screen Surface -> bytes           |                     |
-|   | FrameWriter: GifWriter (Pillow) | Mp4Writer (ffmpeg) |                     |
-|   +------------------------------------------------------+                     |
-+--------------------------------------------------------------------------------+
-```
+
+Solid arrows are imports; the dotted arrow is the `Decision` each agent hands back to the engine.
 
 ### Tick flow
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant E as SimulationEngine
+    participant A as Agent i
+    participant R as core.rules
+    participant V as View / recorder
+    loop every live snake
+        E->>A: decide(state_t, i)
+        A-->>E: Decision(direction, DecisionTrace)
+    end
+    Note over E,A: the engine times every call in ms
+    E->>R: step(state_t, directions)
+    R-->>E: TickResult(state', deaths, eaten)
+    E->>R: spawn_food(state', rng(seed))
+    R-->>E: GameState t+1
+    E->>E: stall counter + repetition table
+    E->>E: _judge(): deaths, loop, stalemate, tick limit
+    E-->>V: TickRecord (read-only)
 ```
-GameState_t --+--> agent_i.decide(state_t, i) ----------> Decision_i {direction, DecisionTrace}
-              |        (engine measures ms per agent)             |
-              |                                                   v
-              +--> rules.step(state_t, {i: direction_i}) --> TickResult {state', deaths, eaten}
-                                                                  |
-                         spawn_food(state', rng(seed)) <----------+
-                                   |
-                                   v
-                              GameState_t+1 ---> TickRecord ---> View (renders, never writes)
-```
+
+If `_judge()` returns a `GameResult`, the match is over; otherwise the next tick starts from `GameState t+1`. The view and the recorder only read the `TickRecord`: they render it and never write to the engine.
 
 ### Why the core is headless and rendering-free
 
@@ -114,6 +114,22 @@ GameState_t --+--> agent_i.decide(state_t, i) ----------> Decision_i {direction,
 - **Head-on collision (*head-to-head*).** The longer snake wins, judged by its length after the move. If both are equally long, both die. A head swap (A moves into B's cell and B into A's) also counts as a head-on collision.
 - **180° turn.** Ignored; the snake keeps its direction.
 
+### Draw rules: loops and stalemates
+
+Two agents can fall into a pattern that never ends: circling without eating, or one chasing the other along the same route over and over. The engine ends those matches with two draw rules:
+
+- **Threefold repetition (`DRAW_CYCLE`).** A *position* is the board without the tick counter: bodies, headings, pending growth, liveness and food. Since `GameState` and `Snake` are immutable and hashable, the position is simply the tuple of snake snapshots plus the food `frozenset`, used directly as a dictionary key. The third sighting of the same position ends the match, as in chess.
+- **Stall timeout (`DRAW_STALEMATE`).** If nobody eats for $\lfloor 1.5 \cdot W \cdot H \rfloor$ ticks in a row (1,441 on the 31×31 board), the match ends. `--stall-ticks N` sets a different limit.
+- **Precedence within a tick:** deaths, then the loop, then the stalemate, then the tick limit (`max_ticks`), which still gives the win to the longer survivor. Loops and stalemates are draws whatever the lengths; otherwise a snake that is ahead could win just by stalling.
+- **Exact, bounded memory.** A meal raises $L + g$ for the snake that eats, and that sum never goes down, so no earlier position can ever come back. The repetition table is cleared on every meal: it only covers the current foodless stretch and never holds more entries than the stall limit.
+- **Cost:** about 2 µs per tick (one hash over $O(L_1 + L_2)$ cells), roughly 0.05% of a 3.8 ms tick.
+
+`GameResult` records how every match ended: `LAST_STANDING`, `NO_SURVIVORS`, `TICK_LIMIT`, `DRAW_CYCLE` or `DRAW_STALEMATE`. In `watch`, the banner shows `DRAW: LOOP DETECTED` (with the loop period) or `DRAW: STALEMATE`, the scoreboard adds a draw and the next round starts after `--delay-restart`. `--disable-cycle-detection` turns the repetition rule off for debugging.
+
+**It caught a real case straight away.** In benchmark seed 8, nobody eats after tick 7: the AI stays in `INTERCEPT` ("cut opp route at…") and both snakes repeat the same 14-tick cycle. Before this rule, the match ran to the 5,000-tick limit and counted as an AI win on length (6 vs 4); it now ends at tick 52 as a draw. That single match made up about a third of all benchmark ticks (see [section 3](#3-benchmarks-and-performance)).
+
+Across 240 matches (60 seeds for each of four matchups: greedy vs AI on `cross` and on `open`, AI vs AI and greedy vs greedy on `cross`), the repetition rule fired 9 times (3.75%) and the stall rule never did: no stretch without food went past 292 ticks. The stall limit is a safety net for what the repetition rule cannot see, such as wandering without ever repeating a position.
+
 ### Repository layout
 
 ```
@@ -125,7 +141,7 @@ src/snake_arena/
   view/       theme.py  board.py  hud.py  series_panel.py  scene.py  app.py   pygame-ce
   record/     writers.py  gif.py  mp4.py  recorder.py        streaming GIF/MP4 export
   __main__.py                                                 CLI: play | watch | record | bench
-tests/        105 tests (pytest) + support.py
+tests/        117 tests (pytest) + support.py
 docs/img/     screenshots of real matches
 assets/       showcase.gif / showcase.mp4 generated with `snake-arena record`
 ```
@@ -278,6 +294,7 @@ The outcome is an asymmetric personality: when **smaller, the AI eats**; when **
 | Scoring up to 3 moves | 3 × (reach + Voronoi + rival reach) | $9 \cdot O(V + E)$ |
 | Lethal-cut escape check | ≤ 3 BFS | $O(V + E)$ |
 | Mode plan | 1 weighted A\* | $O(E \log V)$ |
+| Draw rules | 1 hash of the position | $O(L_1 + L_2)$ |
 
 In total, about 15 linear passes and one A\* per decision, over $V = 925$ cells.
 
@@ -293,34 +310,36 @@ The reference opponent (`GreedyAgent`) heads for the nearest food according to t
 
 | Metric | GreedyAgent | Offensive AI |
 |---|---:|---:|
-| **Wins** | 5 / 20 (25%) | **14 / 20 (70%)** |
-| Draws | 1 / 20 (5%) | |
+| **Wins** | 5 / 20 (25%) | **13 / 20 (65%)** |
+| Draws | 2 / 20 (10%): 1 loop (seed 8), 1 mutual death (seed 17) | |
 | Mean final length | 34.0 | 31.4 |
-| Decision latency, mean | 0.53 – 0.59 ms | **3.10 – 3.45 ms** |
-| Decision latency, max | 1.21 – 1.83 ms | 5.91 – 7.16 ms |
-| A\* nodes per decision | — | 13.3 |
+| Decision latency, mean | 0.53 ms | **3.21 – 3.23 ms** |
+| Decision latency, max | 1.16 – 2.93 ms | 7.95 – 8.72 ms |
+| A\* nodes per decision | — | 18.3 |
 | Deaths WALL / SELF / BODY / HEAD_TO_HEAD | 4 / 4 / 3 / 3 | 1 / 1 / 2 / 2 |
 
 Game outcomes (wins, deaths, modes) are **identical across runs** because they depend on the seed. Latencies are ranges over three full benchmark runs and depend on machine load.
 
-A striking result: the AI wins 70% of the matches while **finishing shorter** on average. It does not win by eating more but by position: territorial control, route cuts and traps.
+**These figures already include the [draw rules](#draw-rules-loops-and-stalemates).** Without them, seed 8 ran to the 5,000-tick limit: it counted as an AI win (70% instead of 65%), made up a third of all ticks (a mean of 772 ticks instead of 525) and inflated `INTERCEPT` from 3% to 34% with 4,992 identical decisions. Those trivial decisions also diluted the per-decision averages (13.3 A\* nodes instead of 18.3).
+
+A striking result: the AI wins 65% of the matches while **finishing shorter** on average. It does not win by eating more but by position: territorial control, route cuts and traps.
 
 ### Time budget per tick
 
-| Rate | Budget per tick | Mean use (3.10 – 3.45 ms) | Worst case (5.91 – 7.16 ms) |
+| Rate | Budget per tick | Mean use (3.21 – 3.23 ms) | Worst case (7.95 – 8.72 ms) |
 |---|---:|---:|---:|
-| 10 ticks/s | 100 ms | **3.1 – 3.5%** | 5.9 – 7.2% |
-| 15 ticks/s | 66.7 ms | **4.7 – 5.2%** | 8.9 – 10.7% |
+| 10 ticks/s | 100 ms | **3.2%** | 8.0 – 8.7% |
+| 15 ticks/s | 66.7 ms | **4.8%** | 11.9 – 13.1% |
 
-On average the AI uses under 5% of the budget at 10 ticks/s and about 5% at 15 ticks/s. Even in the worst measured case it leaves more than 89% of the tick free. With the real video driver, the view renders at about 114 FPS (capped at 120) while the simulation holds its 15 ticks/s pace (37 ticks in 2.5 s).
+On average the AI uses about 3% of the budget at 10 ticks/s and under 5% at 15 ticks/s. Even in the worst measured case it leaves more than 86% of the tick free. The draw rules add about 2 µs per tick, which does not show at this scale. With the real video driver, the view renders at about 114 FPS (capped at 120) while the simulation holds its 15 ticks/s pace (37 ticks in 2.5 s).
 
 ### Empirical breakdown of tactical modes
 
 | Mode | Share | Role |
 |---|---:|---|
-| `FORAGE` | 61% | Grow while it has no size advantage; deny the food whose race it wins. |
-| `INTERCEPT` | 34% | Cut the rival's predicted route to its food or to the center. |
-| `CONSTRICT` | 5% | Rare but decisive: seals lethal cuts and wraps around the rival when it dominates the territory. |
+| `FORAGE` | 89% | Grow while it has no size advantage; deny the food whose race it wins. |
+| `INTERCEPT` | 3% | Cut the rival's predicted route to its food or to the center. Short, targeted bursts. |
+| `CONSTRICT` | 8% | Rare but decisive: seals lethal cuts and wraps around the rival when it dominates the territory. |
 | `SURVIVAL` | < 0.5% | Safety net: it only kicks in during endgames, on a saturated board. |
 
 ### Mirror duel: the offensive AI against itself
@@ -336,11 +355,11 @@ On average the AI uses under 5% of the budget at 10 ticks/s and about 5% at 15 t
 | Deaths WALL / SELF / BODY / HEAD_TO_HEAD | 0 / 1 / 1 / 9 | 2 / 1 / 0 / 6 |
 | Modes (F / I / C / S) | 84 / 4 / 12 / 0% | 86 / 4 / 9 / 1% |
 
-Mean duration: 624 ticks.
+Mean duration: 624 ticks. Neither draw rule fires on these seeds, so the figures are the same with or without them.
 
 - **Balance.** The 45/55 split fits a symmetric duel: the starting positions and the arena are symmetric under a 180° rotation, and only the random food breaks the symmetry.
-- **Head-on collisions.** They decide 15 of the 20 matches. With two agents that compute identically, neither wins the interception race (`INTERCEPT` drops to 4%). The match is settled by competing for food, where a single cell of extra length decides the head-on collision.
-- **`CONSTRICT`** rises to 9–12% (5% against the baseline), because a rival that also controls territory ends up more often in small regions that can be sealed.
+- **Head-on collisions.** They decide 15 of the 20 matches. With two agents that compute identically, neither keeps a lead in the interception race (`INTERCEPT` stays marginal: 4%, compared with 3% against the baseline). The match is settled by competing for food, where a single cell of extra length decides the head-on collision.
+- **`CONSTRICT`** rises to 9–12% (8% against the baseline), because a rival that also controls territory ends up more often in small regions that can be sealed.
 
 ### Benchmark-driven tuning
 
@@ -351,8 +370,11 @@ The utilities were not set by eye but by iterating on the same benchmark:
 | v1 | Initial utilities | 65% | 15 / 83 / 2% | 2,698 | 2 |
 | v2 | Grow first; interception bonus only at articulation points; territorial dominance pressure | 70% | 61 / 34 / 5% | 789 | 4 |
 | v3 | A\* penalizes the pincer ring; the safety veto avoids the cell predicted for the rival | 70% | 61 / 34 / 5% | 772 | **2** |
+| v3 + draw rules | No AI change: the engine ends loops and stalemates as draws | 65% | 89 / 3 / 8% | 525 | 2 |
 
 v1 spent 83% of the time intercepting and finished as long as the rival, so it could not exploit the head-on rule. v2 made matches 3.4 times shorter but exposed a weakness: the AI let itself get caught in pincers. Diagnosing each death (`perceive()` on the previous state) showed that it approached the head of an equal or longer rival diagonally. v3 fixes that.
+
+v1 to v3 were measured before the draw rules existed, so their figures include the seed 8 loop. The v1 mean of 2,698 ticks probably hid more loops of the same kind, but that version no longer exists to measure it again.
 
 ---
 
@@ -393,7 +415,7 @@ If the focus is on an agent that publishes no trace (`GreedyAgent` or the human 
 
 `snake-arena watch` pits two autonomous agents (`aggressive` or `greedy`, including the `aggressive` vs `aggressive` mirror duel) against each other in a series of matches with no human input.
 
-- **Automatic restart.** When a match ends, `MatchSeries` records the result, waits for the configured pause (`--delay-restart`, 1 to 2 s) and resets the board with the next seed (`seed + round`). With `--rounds N` it stops after N matches; by default the series never ends.
+- **Automatic restart.** When a match ends, `MatchSeries` records the result, waits for the configured pause (`--delay-restart`, 1 to 2 s) and resets the board with the next seed (`seed + round`). With `--rounds N` it stops after N matches; by default the series never ends. A match stuck in a loop or without food ends as a draw ([draw rules](#draw-rules-loops-and-stalemates)) and follows the same path, so an endless series never gets stuck.
 - **Persistent scoreboard** (third column): current round and countdown, wins and win rate of each agent, draws, mean duration in ticks, tactic mix of each offensive agent (including the match in progress) and the last 12 results.
 - **Switching focus without losing the map.** Two offensive AIs publish exactly the same Voronoi partition, because the algorithm is symmetric with respect to the order of the sources (checked by `test_mirror_agents_publish_the_same_voronoi_partition`). That is why the territory tint does not change when switching focus; what changes are the A\* path, the rival's predicted goal, the interception vector and the chokepoints, which belong to the focused agent. If the focus is on an agent without a trace, the map comes from the other agent's trace.
 - **Decoupling.** `MatchSeries` lives in `engine/`, does not import `pygame` and is tested without a window. The engine never assumes there is a keyboard: the view only passes it the elapsed time and pause or restart commands.
@@ -428,12 +450,27 @@ snake-arena record --overlays voronoi --cell 14 --tick-rate 12 --output clips/vo
 
 ### Streaming pipeline
 
-```
-engine.tick() --> SceneRenderer.draw(off-screen Surface, same size as the view)
-              --> pygame.image.tobytes(surface, "RGB")          a single w·h·3-byte buffer
-              --> FrameWriter.write(bytes, repeat=n)
-                    |-- GifWriter: global palette -> delta with transparent index -> GifImagePlugin.getdata() -> disk
-                    +-- Mp4Writer: pipe to ffmpeg (libx264, yuv420p) through imageio-ffmpeg
+```mermaid
+flowchart TB
+    TICK["engine.tick()"] --> DRAW["SceneRenderer.draw()<br/>off-screen Surface<br/>same size as the view"]
+    DRAW --> BYTES["pygame.image.tobytes()<br/>one w·h·3 RGB buffer"]
+    BYTES --> WRITE{{"FrameWriter.write()"}}
+    WRITE -->|".gif"| GIF["GifWriter<br/>global palette<br/>delta + transparency"]
+    WRITE -->|".mp4"| MP4["Mp4Writer<br/>libx264 · yuv420p"]
+    GIF --> LZW["GifImagePlugin<br/>.getdata() → LZW"]
+    MP4 --> PIPE["imageio-ffmpeg<br/>pipe to ffmpeg"]
+    LZW --> DISK[("disk")]
+    PIPE --> DISK
+
+    classDef core fill:#161b26,stroke:#8b949e,color:#e6edf3,stroke-width:2px
+    classDef analysis fill:#161b26,stroke:#b48cff,color:#e6edf3,stroke-width:2px
+    classDef agents fill:#161b26,stroke:#ff5866,color:#e6edf3,stroke-width:2px
+    classDef engine fill:#161b26,stroke:#4da3ff,color:#e6edf3,stroke-width:2px
+    classDef front fill:#161b26,stroke:#3fb68b,color:#e6edf3,stroke-width:2px
+    class TICK engine
+    class DRAW,BYTES front
+    class WRITE,GIF,MP4,LZW,PIPE analysis
+    class DISK core
 ```
 
 - **No display.** The CLI sets `SDL_VIDEODRIVER=dummy` before loading Pygame, and the recorder only initializes `pygame.font`, never `pygame.display`. It needs no display server: it is meant for Linux CI, although so far it has only been verified on Windows with the `dummy` driver.
@@ -530,9 +567,13 @@ The trace drawn on frame $t$ was computed on state $t-1$: it is the decision tha
 | Global `MAXCOVERAGE` palette without dithering | Per-frame palette or `MEDIANCUT` with dithering | A shared palette enables index-level deltas and transparency; `MAXCOVERAGE` gave the lowest measured maximum error. |
 | Latencies hidden in the recording HUD | Showing the real ms | They are the only non-deterministic content of the frame; hiding them makes the video reproducible byte for byte. |
 | Replay of the decisive frame at the end | Slowing down the last frames live | While streaming, there is no way to know in advance which seal will be decisive; keeping only that frame costs one Surface. |
+| Repetition table cleared on every meal | Sliding window (`deque(maxlen=60)`) | A snake's loop lasts at least as many ticks as the snake is long, and two snakes only repeat together every $\text{lcm}(P_1, P_2)$ ticks: 14 in seed 8, but easily hundreds late in a match. A 60-tick window can only see a threefold loop of up to 30 ticks. The table catches any period, is exact and stays bounded by the stall limit. |
+| Draw on the third sighting | On the second | Agents keep memory (the AI's hysteresis, the human's input buffer), so one repetition does not prove the future repeats too. The third sighting is the chess convention and only costs one more period. |
+| Loops and stalemates are draws | Win for the longer snake, as at the tick limit | Rewarding length would give a snake that is ahead a reason to stall. |
 
 ### Future work
 
+- Anti-loop behavior in the AI: seed 8 shows that `INTERCEPT` can shadow a rival forever without making progress. Penalizing positions that have already been seen would turn that draw into real pressure.
 - Tail chasing along the **longest** path (endgame survival, where the AI's remaining deaths happen).
 - Cut analysis with the temporal model (see above).
 - Shallow minimax or MCTS lookahead, using the pure `rules.step` as the transition model.
@@ -566,25 +607,26 @@ Without `record`, the export tests that need Pillow or ffmpeg are reported as sk
 ### Verification
 
 ```bash
-pytest          # 105 tests; the view and the recorder are tested with SDL_VIDEODRIVER=dummy
+pytest          # 117 tests; the view and the recorder are tested with SDL_VIDEODRIVER=dummy
 mypy            # --strict mode over src/ and tests/ (configured in pyproject.toml)
 ```
 
 | File | Tests | What it covers |
 |---|---:|---|
 | `test_rules.py` | 16 | Collisions: wall, self, body, head-on, head swap, freed tail, deferred growth, simultaneity |
+| `test_draw_rules.py` | 8 | Two snakes circling without food end in `DRAW_CYCLE` on the third sighting, a foodless match ends in `DRAW_STALEMATE`, detection can be disabled, the default limit scales with the area, meals reset the counter and the table, precedence over the tick limit, draws in the series |
 | `test_flood.py` | 7 | Temporal BFS, detours, path reconstruction, Voronoi (neutral band, length tie-break, late start, blocking bodies) |
 | `test_astar.py` | 6 | Optimality, obstacles, telemetry without a path, penalties, temporal goal, weighted A\* bound |
-| `test_cli.py` | 11 | `watch` (defaults, mirror duel, pauses outside 1–2 s, rounds ≤ 0, invalid agents), `record` (flags, unknown format, end-to-end GIF, missing dependency with code 2), mirror `bench` |
+| `test_cli.py` | 13 | `watch` (defaults, mirror duel, pauses outside 1–2 s, rounds ≤ 0, invalid agents), `record` (flags, unknown format, end-to-end GIF, missing dependency with code 2), mirror `bench`, draw-rule flags on every command, draw reasons in the `bench` report |
 | `test_record_export.py` | 11 | Format from the extension or forced, missing dependencies with the install command, decodable MP4 with every frame and byte-for-byte identical, odd sizes rejected |
 | `test_gif_writer.py` | 8 | Exact pixel round trip, minimal delta regions, merging of identical frames, delays at 15 fps (7/6/7 cs), byte-for-byte identical GIF, palette without spurious colors, mandatory calibration, out-of-range fps |
-| `test_recorder.py` | 7 | Mock writer that only stores the SHA-256 of each frame: one RGB frame per tick, final hold, frame-by-frame determinism, overlay presets, lethal-cut replay (with and without the flag), `--max-ticks` |
+| `test_recorder.py` | 8 | Mock writer that only stores the SHA-256 of each frame: one RGB frame per tick, final hold, frame-by-frame determinism, overlay presets, lethal-cut replay (with and without the flag), `--max-ticks`, recording until a loop draw |
 | `test_ai.py` | 6 | Sealing a lethal cut, refusing a losing head-on collision, no suicides, complete trace, identical Voronoi in the mirror duel, determinism |
 | `test_series.py` | 6 | One record per match, pause before restarting, next seed, stop after N rounds, manual restart, live tactic mix without double counting |
 | `test_engine.py` | 5 | Reproducibility by seed, injected clock, tick limit, `reset`, benchmark report |
 | `test_articulation.py` | 4 | Corridors, open grid, door between rooms, occupied root |
 | `test_occupancy.py` | 4 | $\tau(c)$ against `rules.step`, cells threatened by the rival |
-| `test_view_smoke.py` | 3 | `play` mode with overlays and pause, 2-round series with automatic restart, focus switch that keeps the Voronoi map |
+| `test_view_smoke.py` | 4 | `play` mode with overlays and pause, 2-round series with automatic restart, `DRAW: LOOP DETECTED` banner followed by the next round, focus switch that keeps the Voronoi map |
 | `test_snake.py`, `test_grid.py`, `test_human.py`, `test_agents.py` | 11 | Domain model, input buffer, Strategy pattern |
 
 ### Headless benchmark
@@ -636,3 +678,5 @@ snake-arena record --format gif --overlays chokepoints --max-ticks 600 --output 
 | `--size` | all | board side in cells | `31` |
 | `--food` | all | food items on the board at the same time | `3` |
 | `--seed` | all | food seed (in `watch` and `bench`, the seed of the first round) | `0` |
+| `--stall-ticks` | all | ticks in a row without anyone eating before a stalemate draw | 1.5 × board area (`1441`) |
+| `--disable-cycle-detection` | all | turns off the threefold-repetition draw (debugging) | off |

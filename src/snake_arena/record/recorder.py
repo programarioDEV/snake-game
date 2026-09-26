@@ -8,7 +8,7 @@ import pygame
 
 from ..agents import BaseAgent, TacticalMode
 from ..core import Cell, CollisionType, SnakeId
-from ..engine import MatchConfig, SimulationEngine
+from ..engine import GameResult, MatchConfig, SimulationEngine
 from ..view.board import OverlayToggles
 from ..view.scene import SceneRenderer, default_focus, match_result
 from ..view.theme import Theme
@@ -42,6 +42,7 @@ class RecordingSummary:
     frames: int
     ticks: int
     winner: SnakeId | None
+    ending: GameResult | None
     lethal_ending: LethalMoment | None
     replayed: bool
 
@@ -113,6 +114,7 @@ class MatchRecorder:
             frames=frames,
             ticks=self.engine.state.tick,
             winner=self.engine.winner,
+            ending=self.engine.ending,
             lethal_ending=ending,
             replayed=replayed,
         )

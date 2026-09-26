@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from snake_arena.__main__ import build_parser, main
+from snake_arena.__main__ import build_parser, main, match_config
 
 
 def test_watch_defaults_to_an_endless_series_against_the_baseline() -> None:
@@ -78,6 +78,28 @@ def test_record_reports_missing_dependencies(
     code = main(["record", "--size", "13", "--arena", "open", "--output", str(tmp_path / "clip.gif")])
     assert code == 2
     assert 'pip install "snake-arena[record]"' in capsys.readouterr().err
+
+
+def test_draw_rule_flags_reach_the_match_config_of_every_command() -> None:
+    parser = build_parser()
+    default = match_config(parser.parse_args(["watch"]))
+    assert (default.stall_ticks, default.detect_cycles, default.max_stall_ticks) == (None, True, 1441)
+
+    for command in (["play"], ["watch"], ["bench"], ["record", "--output", "x.gif"]):
+        args = parser.parse_args([*command, "--stall-ticks", "150", "--disable-cycle-detection"])
+        config = match_config(args)
+        assert (config.stall_ticks, config.detect_cycles, config.max_stall_ticks) == (150, False, 150)
+
+    for value in ("0", "-5", "many"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["watch", "--stall-ticks", value])
+
+
+def test_bench_reports_why_matches_were_drawn(capsys: pytest.CaptureFixture[str]) -> None:
+    code = main(["bench", "--games", "1", "--size", "13", "--arena", "open", "--food", "0", "--stall-ticks", "5"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "draws 1 (loop 0, stalemate 1)" in out
 
 
 def test_bench_runs_a_mirror_match_headless(capsys: pytest.CaptureFixture[str]) -> None:

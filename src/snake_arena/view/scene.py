@@ -7,7 +7,7 @@ import pygame
 
 from ..agents import AggressiveAIController, BaseAgent, DecisionTrace
 from ..core import Cell, Grid, SnakeId
-from ..engine import MatchSeries, SimulationEngine
+from ..engine import REPETITION_LIMIT, GameResult, MatchSeries, SimulationEngine
 from .board import BoardRenderer, OverlayToggles
 from .hud import HudModel, HudPanel, SnakeRow
 from .series_panel import SeriesPanel
@@ -36,7 +36,12 @@ def decision_traces(engine: SimulationEngine) -> dict[SnakeId, DecisionTrace]:
 
 
 def match_result(engine: SimulationEngine, labels: Sequence[str]) -> tuple[str, str]:
-    """Banner title and death causes of a finished match."""
+    """Banner title and caption (death causes or the draw rule that fired) of a finished match."""
+    if engine.ending is GameResult.DRAW_CYCLE:
+        caption = f"same position {REPETITION_LIMIT} times, repeating every {engine.cycle_period} ticks"
+        return "DRAW: LOOP DETECTED", caption
+    if engine.ending is GameResult.DRAW_STALEMATE:
+        return "DRAW: STALEMATE", f"no food eaten for {engine.ticks_without_food} ticks"
     winner = engine.winner
     title = "DRAW" if winner is None else f"{labels[winner].upper()} WINS"
     causes = ", ".join(f"#{d.snake_id + 1} {d.cause.name}" for d in engine.deaths) or "tick limit"

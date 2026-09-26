@@ -7,7 +7,7 @@ from ..agents import BaseAgent, TacticalMode
 from ..core import CollisionType, SnakeId
 from .config import MatchConfig
 from .series import SeriesStats
-from .simulation import SimulationEngine
+from .simulation import GameResult, SimulationEngine
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +53,8 @@ def format_report(report: BenchmarkReport) -> str:
     ]
     for cause in CollisionType:
         lines.append(row(f"deaths {cause.name}", [str(s.deaths[(sid, cause)]) for sid in ids]))
-    lines += ["", f"draws {s.draws} | avg ticks {s.mean_ticks:.0f}"]
+    loops, stalls = s.endings[GameResult.DRAW_CYCLE], s.endings[GameResult.DRAW_STALEMATE]
+    lines += ["", f"draws {s.draws} (loop {loops}, stalemate {stalls}) | avg ticks {s.mean_ticks:.0f}"]
     for sid in ids:
         modes = s.agents[sid].modes
         total = sum(modes.values())

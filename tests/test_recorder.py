@@ -6,8 +6,9 @@ import pytest
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 
 from snake_arena.agents import AggressiveAIController, BaseAgent, GreedyAgent  # noqa: E402
-from snake_arena.engine import MatchConfig  # noqa: E402
+from snake_arena.engine import GameResult, MatchConfig  # noqa: E402
 from snake_arena.record.recorder import MatchRecorder, RecordOptions  # noqa: E402
+from support import Circler  # noqa: E402
 
 END_HOLD = round(1.5 * 15)
 REPLAY_HOLD = round(2.5 * 15)
@@ -98,6 +99,15 @@ def test_max_ticks_caps_the_recording() -> None:
     config = MatchConfig(width=13, height=13, arena="open", max_ticks=6, seed=2)
     summary = MatchRecorder(config, agents(), RecordOptions(cell=8)).record(FakeWriter())
     assert summary.ticks == 6
+
+
+def test_a_looping_match_is_recorded_until_the_cycle_draw() -> None:
+    config = MatchConfig(width=13, height=13, arena="open", food_count=0)
+    writer = FakeWriter()
+    summary = MatchRecorder(config, [Circler(), Circler()], RecordOptions(cell=8)).record(writer)
+    assert summary.ending is GameResult.DRAW_CYCLE
+    assert (summary.winner, summary.ticks) == (None, 10)
+    assert len(writer.frames) == summary.ticks + 2
 
 
 def test_unknown_overlay_preset_is_rejected() -> None:

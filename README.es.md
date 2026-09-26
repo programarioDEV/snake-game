@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 ![pygame-ce](https://img.shields.io/badge/pygame--ce-2.5-00A86B)
-![pytest](https://img.shields.io/badge/pytest-105%2F105%20passing-2EA44F?logo=pytest&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-117%2F117%20passing-2EA44F?logo=pytest&logoColor=white)
 ![mypy](https://img.shields.io/badge/mypy-strict-2A6DB2)
 
 [English](README.md) · **Español**
@@ -35,66 +35,66 @@ La idea central del proyecto es la **explicabilidad algorítmica**. Cada tick, l
 
 Las dependencias apuntan siempre hacia el núcleo. `core` no importa nada del proyecto. `pygame` solo aparece en `view/` y en `record/`, que reutiliza el mismo `SceneRenderer` para dibujar fotogramas fuera de pantalla. Pillow e imageio-ffmpeg son opcionales y solo se cargan al exportar.
 
+```mermaid
+flowchart TB
+    subgraph FRONT["ventana y vídeo"]
+        direction LR
+        RECORD["<b>record/</b> · sin ventana<br/>MatchRecorder<br/>GifWriter · Mp4Writer"]
+        VIEW["<b>view/</b> · pygame-ce<br/>ArenaApp · SceneRenderer<br/>tablero · HUD · marcador"]
+        RECORD -->|"reutiliza SceneRenderer"| VIEW
+    end
+    ENGINE["<b>engine/</b> · sin pygame<br/>SimulationEngine<br/>MatchSeries · SeriesStats<br/>reglas de empate"]
+    AGENTS["<b>agents/</b> · Strategy<br/>AggressiveAI (utilidades)<br/>HumanController · Greedy"]
+    ANALYSIS["<b>analysis/</b> · sin estado<br/>BFS temporal · Voronoi<br/>A* ponderado · Tarjan"]
+    CORE["<b>core/</b> · puro<br/>Grid · Snake · GameState<br/>rules.step · spawn_food"]
+
+    FRONT -->|"tick() · lee TickRecord"| ENGINE
+    ENGINE -->|"decide(state, id)"| AGENTS
+    AGENTS -.->|"Decision"| ENGINE
+    AGENTS -->|"métricas"| ANALYSIS
+    AGENTS -->|"lee GameState"| CORE
+    ANALYSIS --> CORE
+    ENGINE -->|"step · spawn_food"| CORE
+
+    classDef core fill:#161b26,stroke:#8b949e,color:#e6edf3,stroke-width:2px
+    classDef analysis fill:#161b26,stroke:#b48cff,color:#e6edf3,stroke-width:2px
+    classDef agents fill:#161b26,stroke:#ff5866,color:#e6edf3,stroke-width:2px
+    classDef engine fill:#161b26,stroke:#4da3ff,color:#e6edf3,stroke-width:2px
+    classDef front fill:#161b26,stroke:#3fb68b,color:#e6edf3,stroke-width:2px
+    class CORE core
+    class ANALYSIS analysis
+    class AGENTS agents
+    class ENGINE engine
+    class VIEW,RECORD front
+    style FRONT fill:none,stroke:#3fb68b,stroke-width:1px,stroke-dasharray:5 4
 ```
-+--------------------------------------------------------------------------------+
-|                               snake_arena                                      |
-|                                                                                |
-|   +---------------------+        +----------------------+                      |
-|   |   core/  (puro)     |<-------|  analysis/           |                      |
-|   |---------------------|        |----------------------|                      |
-|   | Grid  Snake         |        | release_times        |                      |
-|   | GameState (frozen)  |        | reach_times  voronoi |                      |
-|   | rules.step()        |        | astar  Tarjan        |                      |
-|   | spawn_food(rng)     |        +----------------------+                      |
-|   +---------------------+                   ^                                  |
-|        ^          ^                         | features                         |
-|        |          |                +----------------------+                    |
-|        |          +----------------|  agents/ (Strategy)  |                    |
-|        |           GameState       |----------------------|                    |
-|        |           (read-only)     | BaseAgent            |                    |
-|        |                           | AggressiveAI (Utility|                    |
-|   +---------------------+          |   + perception)      |                    |
-|   | engine/             |--------->| HumanController      |                    |
-|   |---------------------| decide() | GreedyAgent          |                    |
-|   | SimulationEngine    |<---------+----------------------+                    |
-|   | tick determinista   | Decision{direction, trace}                           |
-|   | métricas por agente |                                                      |
-|   | MatchSeries         |  rondas encadenadas, re-seed, pausa post-partida     |
-|   | SeriesStats         |  marcador (también lo usa el benchmark)              |
-|   +---------------------+                                                      |
-|        |                                                                       |
-|        | TickRecord{state, decisions, compute_ms, tick_ms}   (solo lectura)    |
-|        v                                                                       |
-|   +------------------------------------------------------+                     |
-|   | view/  (pygame-ce)                                   |                     |
-|   | SceneRenderer: board + banner + HUD (+ serie)        |<------+             |
-|   | BoardRenderer: capas alpha cacheadas + overlays      |       |             |
-|   | HudPanel: razonamiento del agente con foco [1]/[2]   |       |             |
-|   | SeriesPanel: marcador, tácticas, últimos resultados  |       |             |
-|   | ArenaApp: ventana, tick fijo desacoplado de los FPS  |       |             |
-|   +------------------------------------------------------+       |             |
-|                                                                  |             |
-|   +------------------------------------------------------+       |             |
-|   | record/  (sin ventana)                               |-------+             |
-|   | MatchRecorder: Surface fuera de pantalla -> bytes    |                     |
-|   | FrameWriter: GifWriter (Pillow) | Mp4Writer (ffmpeg) |                     |
-|   +------------------------------------------------------+                     |
-+--------------------------------------------------------------------------------+
-```
+
+Las flechas continuas son importaciones; la flecha punteada es la `Decision` que cada agente devuelve al motor.
 
 ### Flujo de un tick
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant E as SimulationEngine
+    participant A as Agente i
+    participant R as core.rules
+    participant V as Vista / grabador
+    loop cada serpiente viva
+        E->>A: decide(state_t, i)
+        A-->>E: Decision(dirección, DecisionTrace)
+    end
+    Note over E,A: el motor mide en ms cada llamada
+    E->>R: step(state_t, direcciones)
+    R-->>E: TickResult(state', deaths, eaten)
+    E->>R: spawn_food(state', rng(seed))
+    R-->>E: GameState t+1
+    E->>E: contador sin comida + tabla de repeticiones
+    E->>E: _judge(): muertes, bucle, estancamiento, límite de ticks
+    E-->>V: TickRecord (solo lectura)
 ```
-GameState_t --+--> agent_i.decide(state_t, i) ----------> Decision_i {direction, DecisionTrace}
-              |        (el engine mide ms por agente)             |
-              |                                                   v
-              +--> rules.step(state_t, {i: direction_i}) --> TickResult {state', deaths, eaten}
-                                                                  |
-                         spawn_food(state', rng(seed)) <----------+
-                                   |
-                                   v
-                              GameState_t+1 ---> TickRecord ---> View (renderiza, nunca escribe)
-```
+
+Si `_judge()` devuelve un `GameResult`, la partida termina; si no, el siguiente tick parte de `GameState t+1`. La vista y el grabador solo leen el `TickRecord`: lo dibujan y nunca escriben en el motor.
 
 ### Por qué el núcleo es headless y sin dependencias de renderizado
 
@@ -114,6 +114,22 @@ GameState_t --+--> agent_i.decide(state_t, i) ----------> Decision_i {direction,
 - **Choque frontal (*head-to-head*).** Gana la serpiente más larga según su longitud después del movimiento. Si miden lo mismo, mueren ambas. El cruce de cabezas (A entra en la celda de B y B en la de A) también cuenta como choque frontal.
 - **Giro de 180°.** Se ignora y la serpiente mantiene su dirección.
 
+### Reglas de empate: bucles y estancamiento
+
+Dos agentes pueden caer en un patrón que no termina nunca: dar vueltas sin comer, o que uno persiga al otro por la misma ruta una y otra vez. El motor cierra esas partidas con dos reglas de empate:
+
+- **Triple repetición (`DRAW_CYCLE`).** Una *posición* es el tablero sin el contador de ticks: cuerpos, direcciones, crecimiento pendiente, qué serpientes siguen vivas y la comida. Como `GameState` y `Snake` son inmutables y *hashables*, la posición es simplemente la tupla de las serpientes más el `frozenset` de la comida, y se usa directamente como clave de un diccionario. La tercera aparición de la misma posición termina la partida, como en el ajedrez.
+- **Estancamiento (`DRAW_STALEMATE`).** Si nadie come durante $\lfloor 1.5 \cdot W \cdot H \rfloor$ ticks seguidos (1.441 en el tablero de 31×31), la partida termina. `--stall-ticks N` fija otro límite.
+- **Prioridad dentro de un tick:** primero las muertes, luego el bucle, luego el estancamiento y por último el límite de ticks (`max_ticks`), que sigue dando la victoria a la serpiente viva más larga. Bucles y estancamientos son empate sean cuales sean las longitudes; si no, a una serpiente que va por delante le bastaría con estancar la partida para ganar.
+- **Memoria exacta y acotada.** Comer aumenta $L + g$ de la serpiente que come, y esa suma nunca baja, así que ninguna posición anterior puede volver a darse. La tabla de repeticiones se vacía en cada comida: solo cubre el tramo actual sin comida y nunca guarda más entradas que el límite de estancamiento.
+- **Coste:** unos 2 µs por tick (un *hash* sobre $O(L_1 + L_2)$ celdas), alrededor del 0,05 % de un tick de 3,8 ms.
+
+`GameResult` registra cómo terminó cada partida: `LAST_STANDING`, `NO_SURVIVORS`, `TICK_LIMIT`, `DRAW_CYCLE` o `DRAW_STALEMATE`. En `watch`, el cartel muestra `DRAW: LOOP DETECTED` (con el periodo del bucle) o `DRAW: STALEMATE`, el marcador suma un empate y la siguiente ronda empieza tras `--delay-restart`. `--disable-cycle-detection` desactiva la regla de repetición para depurar.
+
+**Detectó un caso real a la primera.** En la semilla 8 del benchmark nadie come después del tick 7: la IA se queda en `INTERCEPT` ("cut opp route at…") y las dos serpientes repiten el mismo ciclo de 14 ticks. Antes de esta regla, la partida llegaba al límite de 5.000 ticks y contaba como victoria de la IA por longitud (6 contra 4); ahora termina en el tick 52 en empate. Esa sola partida suponía alrededor de un tercio de todos los ticks del benchmark (ver la [sección 3](#3-benchmarks-y-rendimiento)).
+
+En 240 partidas (60 semillas para cada uno de cuatro enfrentamientos: greedy contra la IA en `cross` y en `open`, IA contra IA y greedy contra greedy en `cross`), la regla de repetición se activó 9 veces (3,75 %) y la de estancamiento ninguna: ningún tramo sin comida pasó de 292 ticks. El límite de estancamiento es una red de seguridad para lo que la regla de repetición no puede ver, como vagar sin repetir nunca una posición.
+
 ### Estructura del repositorio
 
 ```
@@ -125,7 +141,7 @@ src/snake_arena/
   view/       theme.py  board.py  hud.py  series_panel.py  scene.py  app.py   pygame-ce
   record/     writers.py  gif.py  mp4.py  recorder.py        exportación GIF/MP4 en streaming
   __main__.py                                                 CLI: play | watch | record | bench
-tests/        105 tests (pytest) + support.py
+tests/        117 tests (pytest) + support.py
 docs/img/     capturas de partidas reales
 assets/       showcase.gif / showcase.mp4 generados con `snake-arena record`
 ```
@@ -278,6 +294,7 @@ El resultado es una personalidad asimétrica: con **desventaja de tamaño, la IA
 | Evaluación de hasta 3 movimientos | 3 × (alcance + Voronoi + alcance del rival) | $9 \cdot O(V + E)$ |
 | Comprobación de escape del corte letal | ≤ 3 BFS | $O(V + E)$ |
 | Plan del modo | 1 A\* ponderado | $O(E \log V)$ |
+| Reglas de empate | 1 *hash* de la posición | $O(L_1 + L_2)$ |
 
 En total son unas 15 pasadas lineales y un A\* por decisión, sobre $V = 925$ celdas.
 
@@ -293,34 +310,36 @@ El rival de referencia (`GreedyAgent`) va a la comida más cercana según el BFS
 
 | Métrica | GreedyAgent | Offensive AI |
 |---|---:|---:|
-| **Victorias** | 5 / 20 (25 %) | **14 / 20 (70 %)** |
-| Empates | 1 / 20 (5 %) | |
+| **Victorias** | 5 / 20 (25 %) | **13 / 20 (65 %)** |
+| Empates | 2 / 20 (10 %): 1 por bucle (semilla 8), 1 por muerte simultánea (semilla 17) | |
 | Longitud final media | 34,0 | 31,4 |
-| Latencia de decisión, media | 0,53 – 0,59 ms | **3,10 – 3,45 ms** |
-| Latencia de decisión, máxima | 1,21 – 1,83 ms | 5,91 – 7,16 ms |
-| Nodos A\* por decisión | — | 13,3 |
+| Latencia de decisión, media | 0,53 ms | **3,21 – 3,23 ms** |
+| Latencia de decisión, máxima | 1,16 – 2,93 ms | 7,95 – 8,72 ms |
+| Nodos A\* por decisión | — | 18,3 |
 | Muertes WALL / SELF / BODY / HEAD_TO_HEAD | 4 / 4 / 3 / 3 | 1 / 1 / 2 / 2 |
 
 Los resultados de juego (victorias, muertes, modos) son **idénticos entre ejecuciones** porque dependen de la semilla. Las latencias son rangos de tres ejecuciones completas del benchmark y dependen de la carga de la máquina.
 
-Un dato llamativo: la IA gana el 70 % de las partidas **terminando más corta** de media. No gana por comer más, sino por posición: control territorial, cortes de ruta y encierros.
+**Estas cifras ya incluyen las [reglas de empate](#reglas-de-empate-bucles-y-estancamiento).** Sin ellas, la semilla 8 llegaba al límite de 5.000 ticks: contaba como victoria de la IA (70 % en lugar de 65 %), suponía un tercio de todos los ticks (media de 772 ticks en lugar de 525) e inflaba `INTERCEPT` del 3 % al 34 % con 4.992 decisiones idénticas. Esas decisiones triviales también diluían las medias por decisión (13,3 nodos A\* en lugar de 18,3).
+
+Un dato llamativo: la IA gana el 65 % de las partidas **terminando más corta** de media. No gana por comer más, sino por posición: control territorial, cortes de ruta y encierros.
 
 ### Presupuesto temporal por tick
 
-| Frecuencia | Presupuesto por tick | Uso medio (3,10 – 3,45 ms) | Peor caso (5,91 – 7,16 ms) |
+| Frecuencia | Presupuesto por tick | Uso medio (3,21 – 3,23 ms) | Peor caso (7,95 – 8,72 ms) |
 |---|---:|---:|---:|
-| 10 ticks/s | 100 ms | **3,1 – 3,5 %** | 5,9 – 7,2 % |
-| 15 ticks/s | 66,7 ms | **4,7 – 5,2 %** | 8,9 – 10,7 % |
+| 10 ticks/s | 100 ms | **3,2 %** | 8,0 – 8,7 % |
+| 15 ticks/s | 66,7 ms | **4,8 %** | 11,9 – 13,1 % |
 
-La IA usa de media menos del 5 % del presupuesto a 10 ticks/s y aproximadamente el 5 % a 15 ticks/s. Incluso en el peor caso medido deja libre más del 89 % del tick. Con el driver de vídeo real, la vista renderiza a unos 114 FPS (tope de 120) mientras la simulación mantiene su ritmo de 15 ticks/s (37 ticks en 2,5 s).
+La IA usa de media alrededor del 3 % del presupuesto a 10 ticks/s y menos del 5 % a 15 ticks/s. Incluso en el peor caso medido deja libre más del 86 % del tick. Las reglas de empate añaden unos 2 µs por tick, que a esta escala no se notan. Con el driver de vídeo real, la vista renderiza a unos 114 FPS (tope de 120) mientras la simulación mantiene su ritmo de 15 ticks/s (37 ticks en 2,5 s).
 
 ### Desglose empírico de modos tácticos
 
 | Modo | Uso | Papel |
 |---|---:|---|
-| `FORAGE` | 61 % | Crecer mientras no tiene ventaja de tamaño; negar la comida que gana en la carrera. |
-| `INTERCEPT` | 34 % | Cortar la ruta prevista del rival hacia su comida o hacia el centro. |
-| `CONSTRICT` | 5 % | Poco frecuente pero decisivo: sella cortes letales y envuelve al rival cuando domina el territorio. |
+| `FORAGE` | 89 % | Crecer mientras no tiene ventaja de tamaño; negar la comida que gana en la carrera. |
+| `INTERCEPT` | 3 % | Cortar la ruta prevista del rival hacia su comida o hacia el centro. Ráfagas cortas y puntuales. |
+| `CONSTRICT` | 8 % | Poco frecuente pero decisivo: sella cortes letales y envuelve al rival cuando domina el territorio. |
 | `SURVIVAL` | < 0,5 % | Red de seguridad: solo se activa en los finales de partida, con el tablero saturado. |
 
 ### Duelo espejo: IA ofensiva contra sí misma
@@ -336,11 +355,11 @@ La IA usa de media menos del 5 % del presupuesto a 10 ticks/s y aproximadamente 
 | Muertes WALL / SELF / BODY / HEAD_TO_HEAD | 0 / 1 / 1 / 9 | 2 / 1 / 0 / 6 |
 | Modos (F / I / C / S) | 84 / 4 / 12 / 0 % | 86 / 4 / 9 / 1 % |
 
-Duración media: 624 ticks.
+Duración media: 624 ticks. Ninguna regla de empate se activa en estas semillas, así que las cifras son las mismas con ellas o sin ellas.
 
 - **Equilibrio.** El reparto 45/55 cuadra con un duelo simétrico: las posiciones de salida y la arena son simétricas por rotación de 180° y solo la comida aleatoria rompe la simetría.
-- **Choque frontal.** Decide 15 de las 20 partidas. Con dos agentes que calculan igual, ninguno gana la carrera por la intercepción (`INTERCEPT` baja al 4 %). La partida se resuelve compitiendo por la comida, donde una sola celda de longitud de ventaja decide el choque frontal.
-- **`CONSTRICT`** sube al 9–12 % (5 % contra el baseline), porque un rival que también controla territorio acaba con más frecuencia en regiones pequeñas que se pueden sellar.
+- **Choque frontal.** Decide 15 de las 20 partidas. Con dos agentes que calculan igual, ninguno mantiene ventaja en la carrera por la intercepción (`INTERCEPT` se queda en un papel marginal: 4 %, frente al 3 % contra el baseline). La partida se resuelve compitiendo por la comida, donde una sola celda de longitud de ventaja decide el choque frontal.
+- **`CONSTRICT`** sube al 9–12 % (8 % contra el baseline), porque un rival que también controla territorio acaba con más frecuencia en regiones pequeñas que se pueden sellar.
 
 ### Ajuste guiado por benchmark
 
@@ -351,8 +370,11 @@ Las utilidades no se fijaron a ojo, sino iterando sobre el mismo benchmark:
 | v1 | Utilidades iniciales | 65 % | 15 / 83 / 2 % | 2.698 | 2 |
 | v2 | Primero crecer; bonus de intercepción solo en articulaciones; presión por dominancia territorial | 70 % | 61 / 34 / 5 % | 789 | 4 |
 | v3 | A\* penaliza el anillo de pinza; el veto de seguridad evita la celda que se predice para el rival | 70 % | 61 / 34 / 5 % | 772 | **2** |
+| v3 + reglas de empate | Sin cambios en la IA: el motor termina bucles y estancamientos en empate | 65 % | 89 / 3 / 8 % | 525 | 2 |
 
 La v1 pasaba el 83 % del tiempo interceptando y terminaba con la misma longitud que el rival, así que no podía aprovechar la regla de choque frontal. La v2 hizo las partidas 3,4 veces más cortas, pero expuso una debilidad: la IA se dejaba atrapar en pinzas. El diagnóstico de cada muerte (`perceive()` sobre el estado previo) mostró que se acercaba en diagonal a la cabeza de un rival igual o más largo. La v3 lo corrige.
+
+De la v1 a la v3 se midieron antes de que existieran las reglas de empate, así que sus cifras incluyen el bucle de la semilla 8. La media de 2.698 ticks de la v1 probablemente escondía más bucles del mismo tipo, pero esa versión ya no existe para volver a medirla.
 
 ---
 
@@ -393,7 +415,7 @@ Si el foco está en un agente que no publica traza (`GreedyAgent` o el jugador h
 
 `snake-arena watch` enfrenta a dos agentes autónomos (`aggressive` o `greedy`, incluido el duelo espejo `aggressive` contra `aggressive`) en una serie de partidas sin intervención humana.
 
-- **Reinicio automático.** Al terminar una partida, `MatchSeries` registra el resultado, espera la pausa configurada (`--delay-restart`, de 1 a 2 s) y reinicia el tablero con la semilla siguiente (`seed + ronda`). Con `--rounds N` se detiene tras N partidas; por defecto la serie no termina.
+- **Reinicio automático.** Al terminar una partida, `MatchSeries` registra el resultado, espera la pausa configurada (`--delay-restart`, de 1 a 2 s) y reinicia el tablero con la semilla siguiente (`seed + ronda`). Con `--rounds N` se detiene tras N partidas; por defecto la serie no termina. Una partida atascada en un bucle o sin comida termina en empate ([reglas de empate](#reglas-de-empate-bucles-y-estancamiento)) y sigue el mismo camino, así que una serie sin fin nunca se queda bloqueada.
 - **Marcador persistente** (tercera columna): ronda actual y cuenta atrás, victorias y porcentaje de cada agente, empates, duración media en ticks, mezcla de tácticas de cada agente ofensivo (incluida la partida en curso) y los 12 últimos resultados.
 - **Foco sin perder el mapa.** Dos IAs ofensivas publican exactamente la misma partición de Voronoi, porque el algoritmo es simétrico respecto al orden de las fuentes (lo comprueba `test_mirror_agents_publish_the_same_voronoi_partition`). Por eso el tinte territorial no cambia al alternar el foco; lo que cambia son la ruta A\*, el objetivo previsto del rival, el vector de intercepción y los cuellos de botella, que pertenecen al agente enfocado. Si el foco está en un agente sin traza, el mapa se toma de la traza del otro.
 - **Desacoplamiento.** `MatchSeries` vive en `engine/`, no importa `pygame` y se prueba sin ventana. El motor nunca asume que haya teclado: la vista solo le pasa el tiempo transcurrido y las órdenes de pausa o reinicio.
@@ -428,12 +450,27 @@ snake-arena record --overlays voronoi --cell 14 --tick-rate 12 --output clips/vo
 
 ### Pipeline en streaming
 
-```
-engine.tick() --> SceneRenderer.draw(Surface fuera de pantalla, mismo tamaño que la vista)
-              --> pygame.image.tobytes(surface, "RGB")          un único búfer de w·h·3 bytes
-              --> FrameWriter.write(bytes, repeat=n)
-                    |-- GifWriter: paleta global -> delta con índice transparente -> GifImagePlugin.getdata() -> disco
-                    +-- Mp4Writer: tubería a ffmpeg (libx264, yuv420p) a través de imageio-ffmpeg
+```mermaid
+flowchart TB
+    TICK["engine.tick()"] --> DRAW["SceneRenderer.draw()<br/>Surface fuera de pantalla<br/>mismo tamaño que la vista"]
+    DRAW --> BYTES["pygame.image.tobytes()<br/>un búfer RGB de w·h·3"]
+    BYTES --> WRITE{{"FrameWriter.write()"}}
+    WRITE -->|".gif"| GIF["GifWriter<br/>paleta global<br/>delta + transparencia"]
+    WRITE -->|".mp4"| MP4["Mp4Writer<br/>libx264 · yuv420p"]
+    GIF --> LZW["GifImagePlugin<br/>.getdata() → LZW"]
+    MP4 --> PIPE["imageio-ffmpeg<br/>tubería a ffmpeg"]
+    LZW --> DISK[("disco")]
+    PIPE --> DISK
+
+    classDef core fill:#161b26,stroke:#8b949e,color:#e6edf3,stroke-width:2px
+    classDef analysis fill:#161b26,stroke:#b48cff,color:#e6edf3,stroke-width:2px
+    classDef agents fill:#161b26,stroke:#ff5866,color:#e6edf3,stroke-width:2px
+    classDef engine fill:#161b26,stroke:#4da3ff,color:#e6edf3,stroke-width:2px
+    classDef front fill:#161b26,stroke:#3fb68b,color:#e6edf3,stroke-width:2px
+    class TICK engine
+    class DRAW,BYTES front
+    class WRITE,GIF,MP4,LZW,PIPE analysis
+    class DISK core
 ```
 
 - **Sin display.** La CLI fija `SDL_VIDEODRIVER=dummy` antes de cargar Pygame y el grabador solo inicializa `pygame.font`, nunca `pygame.display`. No necesita servidor gráfico: está pensado para CI de Linux, aunque de momento solo se ha verificado en Windows con el driver `dummy`.
@@ -530,9 +567,13 @@ La traza que se dibuja en el fotograma $t$ se calculó sobre el estado $t-1$: es
 | Paleta global `MAXCOVERAGE` sin dithering | Paleta por fotograma o `MEDIANCUT` con tramado | Una paleta común permite deltas por índice y transparencia; `MAXCOVERAGE` dio el menor error máximo medido. |
 | Latencias ocultas en el HUD de las grabaciones | Mostrar los ms reales | Son el único contenido no determinista del fotograma; ocultarlas hace el vídeo reproducible byte a byte. |
 | Replay del fotograma decisivo al final | Ralentizar los últimos fotogramas en directo | En streaming no se puede saber de antemano qué sellado será decisivo; guardar solo ese fotograma cuesta una Surface. |
+| Tabla de repeticiones que se vacía en cada comida | Ventana deslizante (`deque(maxlen=60)`) | El bucle de una serpiente dura al menos tantos ticks como mide, y dos serpientes solo se repiten a la vez cada $\text{mcm}(P_1, P_2)$ ticks: 14 en la semilla 8, pero fácilmente cientos al final de una partida. Una ventana de 60 ticks solo ve una triple repetición si el bucle dura 30 ticks o menos. La tabla detecta cualquier periodo, es exacta y está acotada por el límite de estancamiento. |
+| Empate a la tercera aparición | A la segunda | Los agentes tienen memoria (la histéresis de la IA, el búfer de entrada del humano), así que una repetición no demuestra que el futuro también se repita. La tercera es la convención del ajedrez y solo cuesta un periodo más. |
+| Bucles y estancamientos son empate | Victoria de la más larga, como en el límite de ticks | Premiar la longitud daría a la serpiente que va por delante un motivo para estancar la partida. |
 
 ### Trabajo futuro
 
+- Comportamiento antibucle en la IA: la semilla 8 muestra que `INTERCEPT` puede seguir a un rival indefinidamente sin avanzar. Penalizar las posiciones ya vistas convertiría ese empate en presión real.
 - Persecución de cola por la ruta **más larga** (supervivencia al final de la partida, donde ocurren las muertes restantes de la IA).
 - Análisis de cortes con el modelo temporal (ver arriba).
 - Anticipación con minimax o MCTS a poca profundidad, usando `rules.step` puro como modelo de transición.
@@ -566,25 +607,26 @@ Sin `record`, los tests de exportación que necesitan Pillow o ffmpeg se marcan 
 ### Verificación
 
 ```bash
-pytest          # 105 tests; la vista y la grabación se prueban con SDL_VIDEODRIVER=dummy
+pytest          # 117 tests; la vista y la grabación se prueban con SDL_VIDEODRIVER=dummy
 mypy            # modo --strict sobre src/ y tests/ (configurado en pyproject.toml)
 ```
 
 | Fichero | Tests | Qué cubre |
 |---|---:|---|
 | `test_rules.py` | 16 | Colisiones: pared, propia, cuerpo, frontal, cruce de cabezas, cola que se libera, crecimiento diferido, simultaneidad |
+| `test_draw_rules.py` | 8 | Dos serpientes que giran sin comida terminan en `DRAW_CYCLE` a la tercera aparición, una partida sin comida termina en `DRAW_STALEMATE`, la detección se puede desactivar, el límite por defecto escala con el área, comer reinicia el contador y la tabla, prioridad frente al límite de ticks, empates en la serie |
 | `test_flood.py` | 7 | BFS temporal, rodeos, reconstrucción de rutas, Voronoi (franja neutral, desempate por longitud, salida tardía, bloqueo por cuerpos) |
 | `test_astar.py` | 6 | Optimalidad, obstáculos, telemetría sin ruta, penalizaciones, meta temporal, cota de A\* ponderado |
-| `test_cli.py` | 11 | `watch` (valores por defecto, duelo espejo, pausas fuera de 1–2 s, rondas ≤ 0, agentes no válidos), `record` (flags, formato desconocido, GIF de extremo a extremo, dependencia ausente con código 2), `bench` espejo |
+| `test_cli.py` | 13 | `watch` (valores por defecto, duelo espejo, pausas fuera de 1–2 s, rondas ≤ 0, agentes no válidos), `record` (flags, formato desconocido, GIF de extremo a extremo, dependencia ausente con código 2), `bench` espejo, flags de las reglas de empate en todos los comandos, motivos de empate en el informe de `bench` |
 | `test_record_export.py` | 11 | Formato por extensión o forzado, dependencias ausentes con el comando de instalación, MP4 decodificable con todos los fotogramas e idéntico byte a byte, tamaños impares rechazados |
 | `test_gif_writer.py` | 8 | Ida y vuelta exacta de píxeles, regiones delta mínimas, fusión de fotogramas idénticos, retardos a 15 fps (7/6/7 cs), GIF idéntico byte a byte, paleta sin colores espurios, calibración obligatoria, fps fuera de rango |
-| `test_recorder.py` | 7 | Writer simulado que solo guarda el SHA-256 de cada fotograma: un fotograma RGB por tick, pausa final, determinismo fotograma a fotograma, presets de overlays, replay del corte letal (con y sin flag), `--max-ticks` |
+| `test_recorder.py` | 8 | Writer simulado que solo guarda el SHA-256 de cada fotograma: un fotograma RGB por tick, pausa final, determinismo fotograma a fotograma, presets de overlays, replay del corte letal (con y sin flag), `--max-ticks`, grabación hasta un empate por bucle |
 | `test_ai.py` | 6 | Sellado de corte letal, rechazo del choque frontal desfavorable, sin suicidios, traza completa, Voronoi idéntico en el duelo espejo, determinismo |
 | `test_series.py` | 6 | Registro único por partida, pausa antes de reiniciar, semilla siguiente, fin tras N rondas, reinicio manual, mezcla de tácticas en vivo sin doble conteo |
 | `test_engine.py` | 5 | Reproducibilidad por semilla, reloj inyectado, límite de ticks, `reset`, informe del benchmark |
 | `test_articulation.py` | 4 | Pasillos, rejilla abierta, puerta entre salas, raíz ocupada |
 | `test_occupancy.py` | 4 | $\tau(c)$ frente a `rules.step`, celdas amenazadas por el rival |
-| `test_view_smoke.py` | 3 | Modo `play` con overlays y pausa, serie de 2 rondas con reinicio automático, cambio de foco que conserva el mapa de Voronoi |
+| `test_view_smoke.py` | 4 | Modo `play` con overlays y pausa, serie de 2 rondas con reinicio automático, cartel `DRAW: LOOP DETECTED` seguido de la siguiente ronda, cambio de foco que conserva el mapa de Voronoi |
 | `test_snake.py`, `test_grid.py`, `test_human.py`, `test_agents.py` | 11 | Modelo de dominio, búfer de entrada, patrón Strategy |
 
 ### Benchmark headless
@@ -636,3 +678,5 @@ snake-arena record --format gif --overlays chokepoints --max-ticks 600 --output 
 | `--size` | todos | lado del tablero en celdas | `31` |
 | `--food` | todos | comida simultánea en el tablero | `3` |
 | `--seed` | todos | semilla de la comida (en `watch` y `bench`, la de la primera ronda) | `0` |
+| `--stall-ticks` | todos | ticks seguidos sin que nadie coma antes del empate por estancamiento | 1,5 × área del tablero (`1441`) |
+| `--disable-cycle-detection` | todos | desactiva el empate por triple repetición (depuración) | desactivado |

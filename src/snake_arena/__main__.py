@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .agents import AggressiveAIController, BaseAgent, GreedyAgent, HumanController
-from .engine import ARENAS, MatchConfig, format_report, run_benchmark
+from .engine import ARENAS, REPETITION_LIMIT, GameResult, MatchConfig, format_report, run_benchmark
 from .record.writers import FORMATS, OVERLAY_PRESETS
 
 AGENTS: dict[str, Callable[[], BaseAgent]] = {
@@ -45,6 +45,16 @@ def build_parser() -> argparse.ArgumentParser:
     board.add_argument("--food", type=int, default=3, help="food items on the board")
     board.add_argument("--seed", type=int, default=0, help="food seed (watch/bench: first round)")
 
+    rules = argparse.ArgumentParser(add_help=False)
+    rules.add_argument(
+        "--stall-ticks", type=_positive_int, default=None, metavar="N",
+        help="draw after N ticks in a row without anyone eating (default: 1.5 x board area)",
+    )
+    rules.add_argument(
+        "--disable-cycle-detection", action="store_true",
+        help=f"debug: do not draw when the same position repeats {REPETITION_LIMIT} times",
+    )
+
     display = argparse.ArgumentParser(add_help=False)
     display.add_argument("--cell", type=int, default=22, help="cell size in pixels")
 
@@ -55,11 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="snake-arena", description="Snake vs an offensive AI.")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    play = commands.add_parser("play", parents=[board, display], help="you (blue) vs the AI (red)")
+    play = commands.add_parser("play", parents=[board, rules, display], help="you (blue) vs the AI (red)")
     play.add_argument("--tick-rate", type=float, default=10.0, help="simulation ticks per second")
 
     watch = commands.add_parser(
-        "watch", parents=[board, display, matchup], help="AI vs AI showcase with auto-restart"
+        "watch", parents=[board, rules, display, matchup], help="AI vs AI showcase with auto-restart"
     )
     watch.add_argument("--tick-rate", type=float, default=15.0, help="simulation ticks per second")
     watch.add_argument("--rounds", type=_positive_int, default=None, help="matches to play (default: endless)")
@@ -69,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     record = commands.add_parser(
-        "record", parents=[board, display, matchup], help="render one match to GIF/MP4 without a window"
+        "record", parents=[board, rules, display, matchup], help="render one match to GIF/MP4 without a window"
     )
     record.add_argument("--output", type=Path, required=True, help="target file, e.g. assets/showcase.gif")
     record.add_argument("--format", choices=FORMATS, default=None, help="default: from the file extension")
@@ -83,17 +93,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="if a lethal cut decides the match, replay that moment before the end",
     )
 
-    bench = commands.add_parser("bench", parents=[board, matchup], help="headless benchmark")
+    bench = commands.add_parser("bench", parents=[board, rules, matchup], help="headless benchmark")
     bench.add_argument("--games", type=_positive_int, default=20)
     return parser
+
+
+def match_config(args: argparse.Namespace) -> MatchConfig:
+    """Board and draw-rule flags shared by every command."""
+    return MatchConfig(
+        width=args.size,
+        height=args.size,
+        arena=args.arena,
+        food_count=args.food,
+        seed=args.seed,
+        stall_ticks=args.stall_ticks,
+        detect_cycles=not args.disable_cycle_detection,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else (sys.argv[1:] or ["play"]))
-    config = MatchConfig(
-        width=args.size, height=args.size, arena=args.arena, food_count=args.food, seed=args.seed
-    )
+    config = match_config(args)
     if args.command == "bench":
         factories = (AGENTS[args.agent_1], AGENTS[args.agent_2])
         print(format_report(run_benchmark(config, args.games, factories)))
@@ -151,6 +172,8 @@ def _record(parser: argparse.ArgumentParser, args: argparse.Namespace, config: M
         f"({summary.duration:.1f} s) | {megabytes:.2f} MB"
     )
     winner = "draw" if summary.winner is None else f"{recorder.labels[summary.winner]} wins"
+    if summary.ending in (GameResult.DRAW_CYCLE, GameResult.DRAW_STALEMATE):
+        winner += f" ({summary.ending})"
     line = f"{winner} after {summary.ticks} ticks"
     if summary.lethal_ending is not None:
         moment = summary.lethal_ending

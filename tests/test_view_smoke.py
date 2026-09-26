@@ -9,9 +9,10 @@ import pygame  # noqa: E402
 
 from snake_arena.agents import AggressiveAIController, GreedyAgent, HumanController  # noqa: E402
 from snake_arena.core import SnakeId  # noqa: E402
-from snake_arena.engine import MatchConfig  # noqa: E402
+from snake_arena.engine import GameResult, MatchConfig  # noqa: E402
 from snake_arena.view.app import ArenaApp, ShowcaseOptions  # noqa: E402
 from snake_arena.view.scene import HUD_WIDTH, SERIES_WIDTH  # noqa: E402
+from support import Circler  # noqa: E402
 
 FIRST, SECOND = SnakeId(0), SnakeId(1)
 
@@ -71,6 +72,32 @@ def test_watch_mode_plays_the_requested_rounds_and_restarts_by_itself() -> None:
     assert app.series.stats.matches == 2
     assert seeds == {7, 8}
     assert app.engine.is_over
+
+
+def test_watch_mode_announces_a_loop_draw_and_moves_to_the_next_round() -> None:
+    config = MatchConfig(width=13, height=13, arena="open", food_count=0)
+    app = ArenaApp(config, [Circler(), Circler()], showcase=ShowcaseOptions(rounds=2, restart_delay=1.0))
+    assert app.series is not None
+    for _ in range(60):
+        app.update(0.1)
+        app.render()
+        if app.series.restart_in is not None:
+            break
+
+    assert app.engine.ending is GameResult.DRAW_CYCLE
+    title, caption = app._result_text()
+    assert title == "DRAW: LOOP DETECTED"
+    assert "every 4 ticks" in caption and "next round in" in caption
+    assert app.series.stats.draws == 1
+
+    for _ in range(100):
+        app.update(0.1)
+        app.render()
+        if app.series.finished:
+            break
+    assert app.series.finished
+    assert app.series.stats.draws == 2
+    assert app.series.stats.endings[GameResult.DRAW_CYCLE] == 2
 
 
 def test_focus_keys_switch_the_inspected_agent_but_keep_the_voronoi_map() -> None:
