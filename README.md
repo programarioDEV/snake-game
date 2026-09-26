@@ -5,40 +5,42 @@
 ![pytest](https://img.shields.io/badge/pytest-105%2F105%20passing-2EA44F?logo=pytest&logoColor=white)
 ![mypy](https://img.shields.io/badge/mypy-strict-2A6DB2)
 
-Snake asimétrico en tiempo real: un jugador humano contra una IA que no solo come y sobrevive, sino que **ataca**. Estrangula el espacio del rival, se interpone en su ruta hacia la comida y sella cuellos de botella para dejarlo encerrado con menos celdas libres que su propia longitud. Un **modo espectador** enfrenta a dos agentes autónomos en series de partidas que se reinician solas, con marcador persistente.
+**English** · [Español](README.es.md)
 
-La idea central del proyecto es la **explicabilidad algorítmica**. Cada tick, la IA publica un `DecisionTrace` con lo que percibió y lo que pretende hacer. La vista lo dibuja como capas de depuración: partición de Voronoi, ruta A\*, vector de intercepción, puntos de articulación y un HUD con las utilidades de cada modo táctico.
+A real-time asymmetric Snake: a human player against an AI that does not just eat and survive, but **attacks**. It squeezes the rival's space, cuts in on its route to food and seals chokepoints to trap it with fewer free cells than its own length. A **spectator mode** pits two autonomous agents against each other in self-restarting match series with a persistent scoreboard.
 
-![Partida completa grabada sin ventana: la IA roja sella un cuello de botella y el vídeo repite el corte letal](assets/showcase.gif)
+The core idea of the project is **algorithmic explainability**. Every tick, the AI publishes a `DecisionTrace` with what it perceived and what it intends to do. The view draws it as debug layers: Voronoi partition, A\* path, interception vector, articulation points and a HUD with the utility of each tactical mode.
 
-*Partida real (semilla 2) grabada sin ventana con `snake-arena record --seed 2 --highlight-lethal --output assets/showcase.gif`. La IA roja gana con un corte letal en el tick 310 y el vídeo repite ese momento antes del resultado final.*
+![Full match recorded headless: the red AI seals a chokepoint and the video replays the lethal cut](assets/showcase.gif)
 
----
-
-## Índice
-
-1. [Arquitectura del sistema](#1-arquitectura-del-sistema)
-2. [Módulo algorítmico y modelado matemático](#2-módulo-algorítmico-y-modelado-matemático)
-3. [Benchmarks y rendimiento](#3-benchmarks-y-rendimiento)
-4. [Capa de inspección: debug overlays](#4-capa-de-inspección-debug-overlays)
-5. [Grabación y exportación de repeticiones](#5-grabación-y-exportación-de-repeticiones)
-6. [Trade-offs y decisiones de diseño](#6-trade-offs-y-decisiones-de-diseño)
-7. [Instalación y reproducibilidad](#7-instalación-y-reproducibilidad)
+*Real match (seed 2) recorded headless with `snake-arena record --seed 2 --highlight-lethal --output assets/showcase.gif`. The red AI wins with a lethal cut at tick 310, and the video replays that moment before the final result.*
 
 ---
 
-## 1. Arquitectura del sistema
+## Contents
 
-### Capas y dirección de dependencias
+1. [System architecture](#1-system-architecture)
+2. [Algorithms and mathematical model](#2-algorithms-and-mathematical-model)
+3. [Benchmarks and performance](#3-benchmarks-and-performance)
+4. [Inspection layer: debug overlays](#4-inspection-layer-debug-overlays)
+5. [Recording and exporting replays](#5-recording-and-exporting-replays)
+6. [Trade-offs and design decisions](#6-trade-offs-and-design-decisions)
+7. [Installation and reproducibility](#7-installation-and-reproducibility)
 
-Las dependencias apuntan siempre hacia el núcleo. `core` no importa nada del proyecto. `pygame` solo aparece en `view/` y en `record/`, que reutiliza el mismo `SceneRenderer` para dibujar fotogramas fuera de pantalla. Pillow e imageio-ffmpeg son opcionales y solo se cargan al exportar.
+---
+
+## 1. System architecture
+
+### Layers and dependency direction
+
+Dependencies always point toward the core. `core` imports nothing from the project. `pygame` only appears in `view/` and `record/`, which reuses the same `SceneRenderer` to draw off-screen frames. Pillow and imageio-ffmpeg are optional and only load when exporting.
 
 ```
 +--------------------------------------------------------------------------------+
 |                               snake_arena                                      |
 |                                                                                |
 |   +---------------------+        +----------------------+                      |
-|   |   core/  (puro)     |<-------|  analysis/           |                      |
+|   |   core/  (pure)     |<-------|  analysis/           |                      |
 |   |---------------------|        |----------------------|                      |
 |   | Grid  Snake         |        | release_times        |                      |
 |   | GameState (frozen)  |        | reach_times  voronoi |                      |
@@ -55,333 +57,368 @@ Las dependencias apuntan siempre hacia el núcleo. `core` no importa nada del pr
 |   | engine/             |--------->| HumanController      |                    |
 |   |---------------------| decide() | GreedyAgent          |                    |
 |   | SimulationEngine    |<---------+----------------------+                    |
-|   | tick determinista   | Decision{direction, trace}                           |
-|   | métricas por agente |                                                      |
-|   | MatchSeries         |  rondas encadenadas, re-seed, pausa post-partida     |
-|   | SeriesStats         |  marcador (también lo usa el benchmark)              |
+|   | deterministic tick  | Decision{direction, trace}                           |
+|   | per-agent metrics   |                                                      |
+|   | MatchSeries         |  chained rounds, re-seed, post-match pause           |
+|   | SeriesStats         |  scoreboard (shared with the benchmark)              |
 |   +---------------------+                                                      |
 |        |                                                                       |
-|        | TickRecord{state, decisions, compute_ms, tick_ms}   (solo lectura)    |
+|        | TickRecord{state, decisions, compute_ms, tick_ms}   (read-only)       |
 |        v                                                                       |
 |   +------------------------------------------------------+                     |
 |   | view/  (pygame-ce)                                   |                     |
-|   | SceneRenderer: board + banner + HUD (+ serie)        |<------+             |
-|   | BoardRenderer: capas alpha cacheadas + overlays      |       |             |
-|   | HudPanel: razonamiento del agente con foco [1]/[2]   |       |             |
-|   | SeriesPanel: marcador, tácticas, últimos resultados  |       |             |
-|   | ArenaApp: ventana, tick fijo desacoplado de los FPS  |       |             |
+|   | SceneRenderer: board + banner + HUD (+ series)       |<------+             |
+|   | BoardRenderer: cached alpha layers + overlays        |       |             |
+|   | HudPanel: focused agent's reasoning [1]/[2]          |       |             |
+|   | SeriesPanel: score, tactics, recent results          |       |             |
+|   | ArenaApp: window, fixed tick decoupled from FPS      |       |             |
 |   +------------------------------------------------------+       |             |
 |                                                                  |             |
 |   +------------------------------------------------------+       |             |
-|   | record/  (sin ventana)                               |-------+             |
-|   | MatchRecorder: Surface fuera de pantalla -> bytes    |                     |
+|   | record/  (headless)                                  |-------+             |
+|   | MatchRecorder: off-screen Surface -> bytes           |                     |
 |   | FrameWriter: GifWriter (Pillow) | Mp4Writer (ffmpeg) |                     |
 |   +------------------------------------------------------+                     |
 +--------------------------------------------------------------------------------+
 ```
 
-### Flujo de un tick
+### Tick flow
 
 ```
 GameState_t --+--> agent_i.decide(state_t, i) ----------> Decision_i {direction, DecisionTrace}
-              |        (el engine mide ms por agente)             |
+              |        (engine measures ms per agent)             |
               |                                                   v
               +--> rules.step(state_t, {i: direction_i}) --> TickResult {state', deaths, eaten}
                                                                   |
                          spawn_food(state', rng(seed)) <----------+
                                    |
                                    v
-                              GameState_t+1 ---> TickRecord ---> View (renderiza, nunca escribe)
+                              GameState_t+1 ---> TickRecord ---> View (renders, never writes)
 ```
 
-### Por qué el núcleo es headless y sin dependencias de renderizado
+### Why the core is headless and rendering-free
 
-| Decisión | Beneficio |
+| Decision | Benefit |
 |---|---|
-| `GameState`, `Snake` y `Grid` son `@dataclass(frozen=True, slots=True)` | Ningún agente ni la vista pueden corromper el estado. Los snapshots se comparten sin copias defensivas y son *hashables*, así que sirven como clave de caché. |
-| `rules.step(state, moves) -> TickResult` es una función pura | El mismo estado y los mismos movimientos dan siempre el mismo resultado. Las reglas de colisión se prueban con 16 tests sin abrir ninguna ventana. |
-| La única aleatoriedad es `random.Random(seed)`, y vive en el engine | Cada partida se reproduce desde su semilla. El benchmark obtiene victorias, muertes y reparto de modos idénticos en cada ejecución; solo varían los tiempos. |
-| `SimulationEngine` no importa `pygame` | Permite benchmarks de miles de ticks sin ventana, CI sin servidor gráfico y una prueba de humo de la vista con `SDL_VIDEODRIVER=dummy`. |
-| El reloj del engine se puede inyectar (`clock=`) | La medición de latencia se prueba de forma determinista con un reloj falso. |
-| Las celdas son índices planos `Cell = NewType("Cell", int)`, con tablas de movimiento y adyacencia precalculadas | El BFS y el A\* recorren enteros y tuplas precalculadas: nada de tuplas `(x, y)` ni comprobaciones de límites en el bucle interno. |
+| `GameState`, `Snake` and `Grid` are `@dataclass(frozen=True, slots=True)` | Neither the agents nor the view can corrupt the state. Snapshots are shared without defensive copies and are *hashable*, so they work as cache keys. |
+| `rules.step(state, moves) -> TickResult` is a pure function | The same state and moves always give the same result. The collision rules are covered by 16 tests without opening a window. |
+| The only randomness is `random.Random(seed)`, and it lives in the engine | Every match can be replayed from its seed. The benchmark yields identical wins, deaths and mode mix on every run; only timings vary. |
+| `SimulationEngine` does not import `pygame` | Enables windowless benchmarks of thousands of ticks, CI without a display server and a view smoke test with `SDL_VIDEODRIVER=dummy`. |
+| The engine clock is injectable (`clock=`) | Latency measurement is tested deterministically with a fake clock. |
+| Cells are flat indices `Cell = NewType("Cell", int)`, with precomputed move and adjacency tables | BFS and A\* iterate over integers and precomputed tuples: no `(x, y)` tuples or bounds checks in the inner loop. |
 
-### Semántica del tick (reglas de combate)
+### Tick semantics (combat rules)
 
-- **Movimiento simultáneo.** Las colisiones se evalúan sobre el tablero ya movido, incluidos los cuerpos de serpientes que mueren en ese mismo tick. El resultado no depende del orden de proceso.
-- **Crecimiento diferido.** Comer suma `pending_growth` y la cola se queda quieta en el tick siguiente. Al empezar cada tick ya se sabe qué colas se liberarán.
-- **Choque frontal (*head-to-head*).** Gana la serpiente más larga según su longitud después del movimiento. Si miden lo mismo, mueren ambas. El cruce de cabezas (A entra en la celda de B y B en la de A) también cuenta como choque frontal.
-- **Giro de 180°.** Se ignora y la serpiente mantiene su dirección.
+- **Simultaneous movement.** Collisions are evaluated on the already-moved board, including the bodies of snakes that die on that same tick. The outcome does not depend on processing order.
+- **Deferred growth.** Eating adds `pending_growth`, and the tail stays put on the following tick. At the start of every tick it is already known which tails will move.
+- **Head-on collision (*head-to-head*).** The longer snake wins, judged by its length after the move. If both are equally long, both die. A head swap (A moves into B's cell and B into A's) also counts as a head-on collision.
+- **180° turn.** Ignored; the snake keeps its direction.
 
-### Estructura del repositorio
+### Repository layout
 
 ```
 src/snake_arena/
-  core/       grid.py  snake.py  state.py  rules.py           modelo de dominio y reglas puras
-  analysis/   occupancy.py  flood.py  astar.py  articulation.py  algoritmos de grafos sin estado
+  core/       grid.py  snake.py  state.py  rules.py           domain model and pure rules
+  analysis/   occupancy.py  flood.py  astar.py  articulation.py  stateless graph algorithms
   agents/     base.py  perception.py  aggressive.py  human.py  baseline.py
-  engine/     config.py  simulation.py  series.py  bench.py   bucle determinista, series y benchmark
+  engine/     config.py  simulation.py  series.py  bench.py   deterministic loop, series and benchmark
   view/       theme.py  board.py  hud.py  series_panel.py  scene.py  app.py   pygame-ce
-  record/     writers.py  gif.py  mp4.py  recorder.py        exportación GIF/MP4 en streaming
+  record/     writers.py  gif.py  mp4.py  recorder.py        streaming GIF/MP4 export
   __main__.py                                                 CLI: play | watch | record | bench
 tests/        105 tests (pytest) + support.py
-docs/img/     capturas de partidas reales
-assets/       showcase.gif / showcase.mp4 generados con `snake-arena record`
+docs/img/     screenshots of real matches
+assets/       showcase.gif / showcase.mp4 generated with `snake-arena record`
 ```
 
 ---
 
-## 2. Módulo algorítmico y modelado matemático
+## 2. Algorithms and mathematical model
 
-Notación: $V$ son las celdas abiertas del tablero y $E \le 2V$ las aristas en vecindad 4. En la arena por defecto (31×31 con muros en cruz), $V = 925$.
+Notation: $V$ is the set of open cells on the board and $E \le 2V$ the edges under 4-neighborhood. In the default arena (31×31 with cross-shaped walls), $V = 925$.
 
-### 2.1 Liberación temporal de segmentos corporales
+### 2.1 Time-aware release of body segments
 
-Un cuerpo no es un muro permanente: cada segmento deja libre su celda al cabo de un número conocido de ticks. Para una serpiente de longitud $L$ con crecimiento pendiente $g$, el segmento de índice $k$ (con $k = 0$ en la cabeza) libera su celda en:
+A body is not a permanent wall: each segment frees its cell after a known number of ticks. For a snake of length $L$ with pending growth $g$, the segment at index $k$ ($k = 0$ is the head) frees its cell at:
 
 ```math
-\tau(c) = L - k + g, \qquad \tau(\text{libre}) = 0, \qquad \tau(\text{obstáculo}) = \infty
+\tau(c) = L - k + g, \qquad \tau(\text{free}) = 0, \qquad \tau(\text{obstacle}) = \infty
 ```
 
-Una cabeza puede entrar en la celda $c$ en el instante $t$ si y solo si $t \ge \tau(c)$. Un test comprueba que este modelo coincide con `rules.step` en cada movimiento posible de una serpiente que persigue su cola, con y sin crecimiento pendiente (`test_release_times_agree_with_the_rules`).
+A head can enter cell $c$ at time $t$ if and only if $t \ge \tau(c)$. A test checks that this model agrees with `rules.step` on every possible move of a snake chasing its own tail, with and without pending growth (`test_release_times_agree_with_the_rules`).
 
-`reach_times` es un BFS con `collections.deque` que solo relaja una arista cuando la celda de destino ya está libre al llegar: $O(V + E)$. Si una celda sigue ocupada, el BFS puede alcanzarla más tarde por un rodeo, cuando el segmento ya se haya ido.
+`reach_times` is a BFS over `collections.deque` that only relaxes an edge when the target cell is already free on arrival: $O(V + E)$. If a cell is still occupied, the BFS can reach it later through a detour, once the segment has left.
 
-### 2.2 Partición territorial: Voronoi BFS multifuente, $O(V + E)$
+### 2.2 Territory partition: multi-source Voronoi BFS, $O(V + E)$
 
-Las cabezas de las dos serpientes se expanden a la vez, por capas de tiempo, sobre el mismo modelo temporal. Si $d_i(c)$ es el tiempo de llegada de la serpiente $i$ a la celda $c$ (cada fuente puede empezar en un instante $s_i$ distinto):
+Both heads expand at the same time, layer by layer in time, over the same temporal model. If $d_i(c)$ is the arrival time of snake $i$ at cell $c$ (each source may start at a different time $s_i$):
 
 ```math
 \text{owner}(c) =
 \begin{cases}
-i & \text{si } d_i(c) < d_j(c) \\
-\arg\max_{\{i,j\}} L^{+} & \text{si } d_i(c) = d_j(c) \text{ y } L_i^{+} \ne L_j^{+} \\
-\text{neutral} & \text{si } d_i(c) = d_j(c) \text{ y } L_i^{+} = L_j^{+}
+i & \text{if } d_i(c) < d_j(c) \\
+\arg\max_{\{i,j\}} L^{+} & \text{if } d_i(c) = d_j(c) \text{ and } L_i^{+} \ne L_j^{+} \\
+\text{neutral} & \text{if } d_i(c) = d_j(c) \text{ and } L_i^{+} = L_j^{+}
 \end{cases}
 ```
 
-Aquí $L^{+}$ es `Snake.next_length`, la longitud después del siguiente movimiento. El desempate reproduce la regla de choque frontal: si las dos llegan a la vez a una celda, la más larga ganaría el choque, así que la celda es suya. La métrica que se muestra en el HUD es la cuota de control $\rho = |V_{IA}| / (|V_{IA}| + |V_{rival}|)$.
+Here $L^{+}$ is `Snake.next_length`, the length after the next move. The tie-break mirrors the head-on rule: if both snakes reach a cell at the same time, the longer one would win the collision, so the cell is its own. The metric shown in the HUD is the control share $\rho = |V_{AI}| / (|V_{AI}| + |V_{rival}|)$.
 
-### 2.3 Búsqueda de rutas: A\* ponderado sobre el grafo temporal
-
-```math
-f(n) = g(n) + w \cdot h(n), \qquad h = \text{Manhattan}, \qquad w = 1.25 \;\Rightarrow\; \text{coste} \le 1.25 \cdot \text{óptimo}
-```
-
-- **Coste de las aristas.** Es $1 + \text{penalización}(c)$. Cuando la IA **no** es más larga, las celdas a las que el rival puede llegar en el siguiente tick cuestan $+12$, y el anillo siguiente, donde el rival podría hacer una pinza, $+4$.
-- **Llegada a la meta.** Se entra en la celda objetivo solo si $t \ge \tau(\text{meta})$. Así, perseguir la cola propia es un caso normal de A\*.
-- **Telemetría** (`PathResult`): ruta, coste acumulado y `nodes_expanded`, también cuando no hay ruta. Un límite de expansiones acota el peor caso.
-- **Desempate del heap.** Se ordena por $(f, h, \text{contador})$: prefiere los nodos más cercanos a la meta y garantiza el determinismo.
-
-### 2.4 Puntos de articulación: Tarjan iterativo, $O(V + E)$
-
-Sobre el grafo de celdas libres ahora mismo ($\tau(c) = 0$), se ejecuta un DFS de Tarjan **iterativo** con raíz en la cabeza del rival. Es iterativo para no chocar con el límite de recursión de CPython en tableros grandes. Para cada punto de articulación $v$, el DFS acumula el tamaño de los subárboles que quedarían separados de la raíz si se quitara $v$. El resultado es el espacio que le quedaría al rival si la IA sellara $v$:
+### 2.3 Pathfinding: weighted A\* over the temporal graph
 
 ```math
-\text{cut\_area}(v) = (n - 1) - \sum_{\substack{c \,\in\, \text{hijos}(v) \\ \text{low}(c) \,\ge\, \text{disc}(v)}} |\text{subárbol}(c)|, \qquad n = |\text{componente de la raíz}| - 1
+f(n) = g(n) + w \cdot h(n), \qquad h = \text{Manhattan}, \qquad w = 1.25 \;\Rightarrow\; \text{cost} \le 1.25 \cdot \text{optimal}
 ```
 
-Todos los cortes se obtienen en **una sola pasada**, sin un flood fill por candidato.
+- **Edge cost.** It is $1 + \text{penalty}(c)$. When the AI is **not** longer, the cells the rival can reach on the next tick cost $+12$, and the ring after that, where the rival could close a pincer, $+4$.
+- **Reaching the goal.** The goal cell is entered only if $t \ge \tau(\text{goal})$. Chasing its own tail is therefore an ordinary A\* query.
+- **Telemetry** (`PathResult`): path, accumulated cost and `nodes_expanded`, also when there is no path. An expansion limit bounds the worst case.
+- **Heap tie-break.** Ordered by $(f, h, \text{counter})$: it prefers nodes closer to the goal and guarantees determinism.
 
-¿Por qué cortes de vértice y no puentes? Un cuerpo ocupa celdas (vértices), no aristas. Además, cualquier puente que separe más de una celda tiene al menos un extremo que ya es punto de articulación, así que el análisis de vértices cubre los estrangulamientos que importan.
+### 2.4 Articulation points: iterative Tarjan, $O(V + E)$
 
-**Corte letal** (lo que activa `CONSTRICT` con utilidad 0,95). Un punto de articulación $v$ es un corte letal si cumple todo esto:
+On the graph of cells that are free right now ($\tau(c) = 0$), an **iterative** Tarjan DFS runs rooted at the rival's head. It is iterative to stay clear of CPython's recursion limit on large boards. For each articulation point $v$, the DFS accumulates the size of the subtrees that would be cut off from the root if $v$ were removed. The result is the space the rival would have left if the AI sealed $v$:
 
 ```math
-\text{cut\_area}(v) < L_{rival} \;\wedge\; t_{IA}(v) \le 10 \;\wedge\; \big(t_{IA}(v) < t_{rival}(v) \;\vee\; (t_{IA}(v) = t_{rival}(v) \wedge L^{+}_{IA} > L^{+}_{rival})\big) \;\wedge\; \text{espacio}_{IA}(v) \ge L_{IA}
+\text{cut\_area}(v) = (n - 1) - \sum_{\substack{c \,\in\, \text{children}(v) \\ \text{low}(c) \,\ge\, \text{disc}(v)}} |\text{subtree}(c)|, \qquad n = |\text{root component}| - 1
 ```
 
-La última condición evita que la IA quede atrapada con el rival.
+Every cut comes out of **a single pass**, with no flood fill per candidate.
 
-### 2.5 Intercepción predictiva
+Why vertex cuts and not bridges? A body occupies cells (vertices), not edges. Besides, any bridge that separates more than one cell has at least one endpoint that is already an articulation point, so the vertex analysis covers the chokepoints that matter.
 
-1. **Objetivo previsto del rival.** Es la comida alcanzable más cercana según $t_{rival}$. Si no hay ninguna, es la celda alcanzable más próxima al centro del tablero: se le bloquea el acceso al centro.
-2. **Ruta prevista.** Se reconstruye hacia atrás desde los tiempos de llegada del BFS, sin guardar una tabla de padres.
-3. **Punto de intercepción.** Es la celda más temprana de esa ruta en la que la IA llega primero, con ventaja $\text{lead}(c) = t_{rival}(c) - t_{IA}(c) \ge \lambda$, donde $\lambda = 0$ si la IA es más larga (acepta el choque frontal, que ganaría) y $\lambda = 1$ si no. Se prefieren los puntos de articulación.
-
-### 2.6 Toma de decisiones: sistema de utilidades con histéresis
-
-Cada tick, `perception.perceive()` calcula todas las métricas **una sola vez**. Luego se puntúan los cuatro modos ($L$ es la longitud de la IA, $A$ su espacio alcanzable y $T_{rival}$ el territorio del rival):
+**Lethal cut** (what triggers `CONSTRICT` with utility 0.95). An articulation point $v$ is a lethal cut when all of the following hold:
 
 ```math
-\begin{aligned}
-S &= \operatorname{clamp}\!\Big(\tfrac{3L - A}{2L}\Big), \qquad \text{calm} = 1 - S \\
-U_{\text{FORAGE}} &= \big(0.35 + 0.45\,h\big)\cdot r \cdot \text{calm}, \qquad h = \operatorname{clamp}\!\Big(\tfrac{L_{rival} - L + 3}{6}\Big),\; r \in \{1,\, 0.5\} \\
-U_{\text{INTERCEPT}} &= \big(0.45 + 0.3\,[\text{corte en articulación}] + 0.1\,[L^{+} > L^{+}_{rival}]\big)\cdot\text{calm} \\
-U_{\text{CONSTRICT}} &= \begin{cases} 0.95\cdot\text{calm} & \text{si hay corte letal} \\ 0.8\cdot\operatorname{clamp}\big(\max(\tfrac{4L_{rival} - T_{rival}}{3L_{rival}},\ \tfrac{\rho - 0.55}{0.25})\big)\cdot\text{calm} & \text{si no} \end{cases} \\
-U_{\text{SURVIVAL}} &= \max(S,\ 0.1)
-\end{aligned}
+\text{cut\_area}(v) < L_{rival} \;\wedge\; t_{AI}(v) \le 10 \;\wedge\; \big(t_{AI}(v) < t_{rival}(v) \;\vee\; (t_{AI}(v) = t_{rival}(v) \wedge L^{+}_{AI} > L^{+}_{rival})\big) \;\wedge\; \text{space}_{AI}(v) \ge L_{AI}
 ```
 
-Aquí $r = 1$ si la IA gana la carrera hacia esa comida y $0.5$ si no. El término de dominancia $(\rho - 0.55)/0.25$ solo cuenta cuando la IA es más larga.
+The last condition keeps the AI from getting trapped along with the rival.
 
-El resultado es una personalidad asimétrica: con **desventaja de tamaño, la IA come**; **con ventaja, hostiga**; si detecta un **corte letal, estrangula**; y si su espacio se reduce, **persigue su cola**.
+### 2.5 Predictive interception
 
-- **Histéresis.** Se mantiene el modo anterior mientras la diferencia con el mejor sea menor que 0,08. Esto evita que el modo oscile tick a tick y que el HUD parpadee.
-- **Planificación por modo.**
-  - `FORAGE`: A\* hacia la comida elegida.
-  - `INTERCEPT`: A\* hacia el punto de intercepción.
-  - `CONSTRICT`: A\* hacia el corte letal; si no lo hay, elige el movimiento que minimiza el espacio y el territorio del rival.
-  - `SURVIVAL`: A\* hacia la propia cola; si no hay ruta, el movimiento con más espacio.
-- **Filtro de seguridad por capas.** Veta la propuesta del modo si hace falta. El pool de movimientos es el primer nivel no vacío de esta lista:
-  1. espacio suficiente y sin choque frontal desfavorable;
-  2. espacio suficiente y distinto de la celda que se predice que tomará el rival;
-  3. espacio suficiente;
-  4. cualquier movimiento no letal.
+1. **Rival's predicted goal.** The nearest reachable food according to $t_{rival}$. If there is none, the reachable cell closest to the center of the board: the rival is cut off from the center.
+2. **Predicted route.** Rebuilt backwards from the BFS arrival times, without storing a parent table.
+3. **Interception point.** The earliest cell on that route that the AI reaches first, with a lead $\text{lead}(c) = t_{rival}(c) - t_{AI}(c) \ge \lambda$, where $\lambda = 0$ if the AI is longer (it accepts the head-on collision, which it would win) and $\lambda = 1$ otherwise. Articulation points are preferred.
 
-  "Espacio suficiente" significa $A' \ge \min(L, \max A')$, así que la IA nunca entra en un hueco más pequeño que su cuerpo si existe una alternativa. Cada veto queda anotado en el `rationale` (`| safety -> DOWN`).
+### 2.6 Decision making: utility system with hysteresis
 
-### 2.7 Coste por tick
+Every tick, `perception.perceive()` computes all the metrics **exactly once**. They score the four tactical modes, and the mode with the highest utility wins.
 
-| Paso | Operación | Complejidad |
+**Notation.** $L$ and $L_{rival}$ are the lengths of the AI and the rival; $L^{+}$ is the length after the next move; $A$ is the space the AI can reach; $T_{rival}$ is the rival's Voronoi territory; and $\rho$ is the AI's control share (section 2.2). $\text{clamp}(x)$ clips $x$ to the interval $[0, 1]$, and $[P]$ is 1 if condition $P$ holds and 0 otherwise.
+
+#### Auxiliary signals
+
+```math
+S = \text{clamp}\left(\frac{3L - A}{2L}\right) \qquad\qquad \text{calm} = 1 - S
+```
+
+$S$ is the survival urgency: it is 0 while the AI has at least $3L$ cells and reaches 1 when its space drops to $L$. The `calm` factor damps every offensive mode as danger grows.
+
+```math
+h = \text{clamp}\left(\frac{L_{rival} - L + 3}{6}\right) \qquad\qquad r = \begin{cases} 1 & \text{if the AI wins the race to that food} \\ 0.5 & \text{otherwise} \end{cases}
+```
+
+$h$ is hunger: it grows the shorter the AI is compared with the rival.
+
+#### Utility of each mode
+
+```math
+U_{\text{FORAGE}} = (0.35 + 0.45\,h) \cdot r \cdot \text{calm}
+```
+
+```math
+U_{\text{INTERCEPT}} = \big(0.45 + 0.3\,[\text{cut at an articulation point}] + 0.1\,[L^{+} > L^{+}_{rival}]\big) \cdot \text{calm}
+```
+
+```math
+U_{\text{CONSTRICT}} = \begin{cases} 0.95 \cdot \text{calm} & \text{if a lethal cut exists} \\ 0.8 \cdot \text{clamp}\big(\max(\sigma,\ \delta)\big) \cdot \text{calm} & \text{otherwise} \end{cases}
+```
+
+```math
+\sigma = \frac{4L_{rival} - T_{rival}}{3L_{rival}} \qquad\qquad \delta = \begin{cases} (\rho - 0.55) / 0.25 & \text{if } L^{+} > L^{+}_{rival} \\ 0 & \text{otherwise} \end{cases}
+```
+
+```math
+U_{\text{SURVIVAL}} = \max(S,\ 0.1)
+```
+
+$\sigma$ measures how starved the rival is: 0 when its territory is $4L_{rival}$ cells and 1 when it drops to $L_{rival}$. $\delta$ measures dominance: it goes from 0 to 1 as the AI's control share rises from 55% to 80%, and it only counts when the AI is longer.
+
+| Mode | High utility when… |
+|---|---|
+| `FORAGE` | the AI is shorter than the rival and reaches the food first |
+| `INTERCEPT` | there is an interception point on the rival's predicted route, especially at a chokepoint |
+| `CONSTRICT` | a lethal cut exists, the rival's territory is shrinking, or the AI is longer and dominates the board |
+| `SURVIVAL` | the AI's space approaches its length; the 0.1 floor always leaves a fallback plan |
+
+The outcome is an asymmetric personality: when **smaller, the AI eats**; when **bigger, it harasses**; when it spots a **lethal cut, it strangles**; and when its space shrinks, it **chases its own tail**.
+
+- **Hysteresis.** The previous mode is kept while its gap to the best mode is below 0.08. This stops the mode from flipping every tick and the HUD from flickering.
+- **Per-mode planning.**
+  - `FORAGE`: A\* to the chosen food.
+  - `INTERCEPT`: A\* to the interception point.
+  - `CONSTRICT`: A\* to the lethal cut; without one, the move that minimizes the rival's space and territory.
+  - `SURVIVAL`: A\* to its own tail; without a path, the move with the most space.
+- **Layered safety filter.** It vetoes the mode's proposal when needed. The move pool is the first non-empty tier of this list:
+  1. enough space and no losing head-on collision;
+  2. enough space and not the cell the rival is predicted to take;
+  3. enough space;
+  4. any non-lethal move.
+
+  "Enough space" means $A' \ge \min(L, \max A')$, so the AI never enters a pocket smaller than its body if there is an alternative. Every veto is logged in the `rationale` (`| safety -> DOWN`).
+
+### 2.7 Cost per tick
+
+| Step | Operation | Complexity |
 |---|---|---|
-| Liberación temporal | 1 pasada por los cuerpos | $O(V)$ |
-| Alcance propio y del rival | 2 BFS temporales | $O(V + E)$ |
-| Voronoi actual | 1 BFS multifuente | $O(V + E)$ |
-| Cuellos de botella | 1 DFS de Tarjan | $O(V + E)$ |
-| Evaluación de hasta 3 movimientos | 3 × (alcance + Voronoi + alcance del rival) | $9 \cdot O(V + E)$ |
-| Comprobación de escape del corte letal | ≤ 3 BFS | $O(V + E)$ |
-| Plan del modo | 1 A\* ponderado | $O(E \log V)$ |
+| Temporal release | 1 pass over the bodies | $O(V)$ |
+| Own and rival reach | 2 temporal BFS | $O(V + E)$ |
+| Current Voronoi | 1 multi-source BFS | $O(V + E)$ |
+| Chokepoints | 1 Tarjan DFS | $O(V + E)$ |
+| Scoring up to 3 moves | 3 × (reach + Voronoi + rival reach) | $9 \cdot O(V + E)$ |
+| Lethal-cut escape check | ≤ 3 BFS | $O(V + E)$ |
+| Mode plan | 1 weighted A\* | $O(E \log V)$ |
 
-En total son unas 15 pasadas lineales y un A\* por decisión, sobre $V = 925$ celdas.
+In total, about 15 linear passes and one A\* per decision, over $V = 925$ cells.
 
 ---
 
-## 3. Benchmarks y rendimiento
+## 3. Benchmarks and performance
 
-Condiciones: 20 partidas, `GreedyAgent` (azul) contra `Offensive AI` (roja), arena `cross` de 31×31, semillas 0 a 19, límite de 5.000 ticks. Máquina: AMD Ryzen 7 5700X, Windows 11, CPython 3.12.10, un solo hilo.
+Setup: 20 matches, `GreedyAgent` (blue) vs `Offensive AI` (red), 31×31 `cross` arena, seeds 0 to 19, 5,000-tick limit. Machine: AMD Ryzen 7 5700X, Windows 11, CPython 3.12.10, single thread.
 
-El rival de referencia (`GreedyAgent`) va a la comida más cercana según el BFS temporal, no entra en huecos más pequeños que él y evita los choques frontales que perdería. Es decir, no es un rival trivial.
+The reference opponent (`GreedyAgent`) heads for the nearest food according to the temporal BFS, refuses pockets smaller than itself and avoids head-on collisions it would lose. In other words, it is not a trivial opponent.
 
-### Resultados
+### Results
 
-| Métrica | GreedyAgent | Offensive AI |
+| Metric | GreedyAgent | Offensive AI |
 |---|---:|---:|
-| **Victorias** | 5 / 20 (25 %) | **14 / 20 (70 %)** |
-| Empates | 1 / 20 (5 %) | |
-| Longitud final media | 34,0 | 31,4 |
-| Latencia de decisión, media | 0,53 – 0,59 ms | **3,10 – 3,45 ms** |
-| Latencia de decisión, máxima | 1,21 – 1,83 ms | 5,91 – 7,16 ms |
-| Nodos A\* por decisión | — | 13,3 |
-| Muertes WALL / SELF / BODY / HEAD_TO_HEAD | 4 / 4 / 3 / 3 | 1 / 1 / 2 / 2 |
+| **Wins** | 5 / 20 (25%) | **14 / 20 (70%)** |
+| Draws | 1 / 20 (5%) | |
+| Mean final length | 34.0 | 31.4 |
+| Decision latency, mean | 0.53 – 0.59 ms | **3.10 – 3.45 ms** |
+| Decision latency, max | 1.21 – 1.83 ms | 5.91 – 7.16 ms |
+| A\* nodes per decision | — | 13.3 |
+| Deaths WALL / SELF / BODY / HEAD_TO_HEAD | 4 / 4 / 3 / 3 | 1 / 1 / 2 / 2 |
 
-Los resultados de juego (victorias, muertes, modos) son **idénticos entre ejecuciones** porque dependen de la semilla. Las latencias son rangos de tres ejecuciones completas del benchmark y dependen de la carga de la máquina.
+Game outcomes (wins, deaths, modes) are **identical across runs** because they depend on the seed. Latencies are ranges over three full benchmark runs and depend on machine load.
 
-Un dato llamativo: la IA gana el 70 % de las partidas **terminando más corta** de media. No gana por comer más, sino por posición: control territorial, cortes de ruta y encierros.
+A striking result: the AI wins 70% of the matches while **finishing shorter** on average. It does not win by eating more but by position: territorial control, route cuts and traps.
 
-### Presupuesto temporal por tick
+### Time budget per tick
 
-| Frecuencia | Presupuesto por tick | Uso medio (3,10 – 3,45 ms) | Peor caso (5,91 – 7,16 ms) |
+| Rate | Budget per tick | Mean use (3.10 – 3.45 ms) | Worst case (5.91 – 7.16 ms) |
 |---|---:|---:|---:|
-| 10 ticks/s | 100 ms | **3,1 – 3,5 %** | 5,9 – 7,2 % |
-| 15 ticks/s | 66,7 ms | **4,7 – 5,2 %** | 8,9 – 10,7 % |
+| 10 ticks/s | 100 ms | **3.1 – 3.5%** | 5.9 – 7.2% |
+| 15 ticks/s | 66.7 ms | **4.7 – 5.2%** | 8.9 – 10.7% |
 
-La IA usa de media menos del 5 % del presupuesto a 10 ticks/s y aproximadamente el 5 % a 15 ticks/s. Incluso en el peor caso medido deja libre más del 89 % del tick. Con el driver de vídeo real, la vista renderiza a unos 114 FPS (tope de 120) mientras la simulación mantiene su ritmo de 15 ticks/s (37 ticks en 2,5 s).
+On average the AI uses under 5% of the budget at 10 ticks/s and about 5% at 15 ticks/s. Even in the worst measured case it leaves more than 89% of the tick free. With the real video driver, the view renders at about 114 FPS (capped at 120) while the simulation holds its 15 ticks/s pace (37 ticks in 2.5 s).
 
-### Desglose empírico de modos tácticos
+### Empirical breakdown of tactical modes
 
-| Modo | Uso | Papel |
+| Mode | Share | Role |
 |---|---:|---|
-| `FORAGE` | 61 % | Crecer mientras no tiene ventaja de tamaño; negar la comida que gana en la carrera. |
-| `INTERCEPT` | 34 % | Cortar la ruta prevista del rival hacia su comida o hacia el centro. |
-| `CONSTRICT` | 5 % | Poco frecuente pero decisivo: sella cortes letales y envuelve al rival cuando domina el territorio. |
-| `SURVIVAL` | < 0,5 % | Red de seguridad: solo se activa en los finales de partida, con el tablero saturado. |
+| `FORAGE` | 61% | Grow while it has no size advantage; deny the food whose race it wins. |
+| `INTERCEPT` | 34% | Cut the rival's predicted route to its food or to the center. |
+| `CONSTRICT` | 5% | Rare but decisive: seals lethal cuts and wraps around the rival when it dominates the territory. |
+| `SURVIVAL` | < 0.5% | Safety net: it only kicks in during endgames, on a saturated board. |
 
-### Duelo espejo: IA ofensiva contra sí misma
+### Mirror duel: the offensive AI against itself
 
-`snake-arena bench --agent-1 aggressive --agent-2 aggressive`, mismas 20 semillas:
+`snake-arena bench --agent-1 aggressive --agent-2 aggressive`, same 20 seeds:
 
-| Métrica | #1 Offensive AI | #2 Offensive AI |
+| Metric | #1 Offensive AI | #2 Offensive AI |
 |---|---:|---:|
-| Victorias | 9 (45 %) | 11 (55 %) |
-| Empates | 0 | |
-| Longitud final media | 35,8 | 36,1 |
-| Latencia de decisión media / máxima | 3,26 / 8,71 ms | 3,25 / 8,87 ms |
-| Muertes WALL / SELF / BODY / HEAD_TO_HEAD | 0 / 1 / 1 / 9 | 2 / 1 / 0 / 6 |
-| Modos (F / I / C / S) | 84 / 4 / 12 / 0 % | 86 / 4 / 9 / 1 % |
+| Wins | 9 (45%) | 11 (55%) |
+| Draws | 0 | |
+| Mean final length | 35.8 | 36.1 |
+| Mean / max decision latency | 3.26 / 8.71 ms | 3.25 / 8.87 ms |
+| Deaths WALL / SELF / BODY / HEAD_TO_HEAD | 0 / 1 / 1 / 9 | 2 / 1 / 0 / 6 |
+| Modes (F / I / C / S) | 84 / 4 / 12 / 0% | 86 / 4 / 9 / 1% |
 
-Duración media: 624 ticks.
+Mean duration: 624 ticks.
 
-- **Equilibrio.** El reparto 45/55 cuadra con un duelo simétrico: las posiciones de salida y la arena son simétricas por rotación de 180° y solo la comida aleatoria rompe la simetría.
-- **Choque frontal.** Decide 15 de las 20 partidas. Con dos agentes que calculan igual, ninguno gana la carrera por la intercepción (`INTERCEPT` baja al 4 %). La partida se resuelve compitiendo por la comida, donde una sola celda de longitud de ventaja decide el choque frontal.
-- **`CONSTRICT`** sube al 9–12 % (5 % contra el baseline), porque un rival que también controla territorio acaba con más frecuencia en regiones pequeñas que se pueden sellar.
+- **Balance.** The 45/55 split fits a symmetric duel: the starting positions and the arena are symmetric under a 180° rotation, and only the random food breaks the symmetry.
+- **Head-on collisions.** They decide 15 of the 20 matches. With two agents that compute identically, neither wins the interception race (`INTERCEPT` drops to 4%). The match is settled by competing for food, where a single cell of extra length decides the head-on collision.
+- **`CONSTRICT`** rises to 9–12% (5% against the baseline), because a rival that also controls territory ends up more often in small regions that can be sealed.
 
-### Ajuste guiado por benchmark
+### Benchmark-driven tuning
 
-Las utilidades no se fijaron a ojo, sino iterando sobre el mismo benchmark:
+The utilities were not set by eye but by iterating on the same benchmark:
 
-| Iteración | Cambio | Victorias IA | Modos (F / I / C) | Ticks medios | Muertes H2H de la IA |
+| Iteration | Change | AI wins | Modes (F / I / C) | Mean ticks | AI H2H deaths |
 |---|---|---:|---|---:|---:|
-| v1 | Utilidades iniciales | 65 % | 15 / 83 / 2 % | 2.698 | 2 |
-| v2 | Primero crecer; bonus de intercepción solo en articulaciones; presión por dominancia territorial | 70 % | 61 / 34 / 5 % | 789 | 4 |
-| v3 | A\* penaliza el anillo de pinza; el veto de seguridad evita la celda que se predice para el rival | 70 % | 61 / 34 / 5 % | 772 | **2** |
+| v1 | Initial utilities | 65% | 15 / 83 / 2% | 2,698 | 2 |
+| v2 | Grow first; interception bonus only at articulation points; territorial dominance pressure | 70% | 61 / 34 / 5% | 789 | 4 |
+| v3 | A\* penalizes the pincer ring; the safety veto avoids the cell predicted for the rival | 70% | 61 / 34 / 5% | 772 | **2** |
 
-La v1 pasaba el 83 % del tiempo interceptando y terminaba con la misma longitud que el rival, así que no podía aprovechar la regla de choque frontal. La v2 hizo las partidas 3,4 veces más cortas, pero expuso una debilidad: la IA se dejaba atrapar en pinzas. El diagnóstico de cada muerte (`perceive()` sobre el estado previo) mostró que se acercaba en diagonal a la cabeza de un rival igual o más largo. La v3 lo corrige.
+v1 spent 83% of the time intercepting and finished as long as the rival, so it could not exploit the head-on rule. v2 made matches 3.4 times shorter but exposed a weakness: the AI let itself get caught in pincers. Diagnosing each death (`perceive()` on the previous state) showed that it approached the head of an equal or longer rival diagonally. v3 fixes that.
 
 ---
 
-## 4. Capa de inspección: debug overlays
+## 4. Inspection layer: debug overlays
 
-| Tecla | Overlay | Qué muestra | Campo de `DecisionTrace` |
+| Key | Overlay | What it shows | `DecisionTrace` field |
 |---|---|---|---|
-| `[V]` | Voronoi | Tinte translúcido por dueño y línea de frontera entre territorios | `territory`, `territory_ratio` |
-| `[P]` | Ruta A\* | Polilínea desde la cabeza de la IA hasta su objetivo | `planned_path`, `path_cost`, `nodes_expanded` |
-| `[I]` | Intercepción | Ruta prevista del rival (puntos), su objetivo (anillo) y vector discontinuo hasta el punto de corte (mira) | `opponent_path`, `opponent_goal`, `intercept_point` |
-| `[C]` | Cuellos de botella | Rombos en los puntos de articulación; relleno magenta si el corte es letal (espacio < longitud del rival) | `chokepoints`, `lethal_cut` |
-| `[TAB]` | Todos | Activa o desactiva todos los overlays a la vez | |
+| `[V]` | Voronoi | Translucent tint per owner and a border line between territories | `territory`, `territory_ratio` |
+| `[P]` | A\* path | Polyline from the AI's head to its goal | `planned_path`, `path_cost`, `nodes_expanded` |
+| `[I]` | Interception | Rival's predicted route (dots), its goal (ring) and a dashed vector to the cut point (crosshair) | `opponent_path`, `opponent_goal`, `intercept_point` |
+| `[C]` | Chokepoints | Diamonds on articulation points; magenta fill if the cut is lethal (space < rival's length) | `chokepoints`, `lethal_cut` |
+| `[TAB]` | All | Toggles every overlay at once | |
 
-Los overlays y el HUD muestran siempre la traza del **agente con foco**, que se elige con `[1]` y `[2]`. Por defecto el foco es el primer agente ofensivo.
+The overlays and the HUD always show the trace of the **focused agent**, selected with `[1]` and `[2]`. By default the focus is on the first offensive agent.
 
-**HUD táctico** (panel lateral):
+**Tactical HUD** (side panel):
 
-- Las dos serpientes con su longitud; una flecha marca la que tiene el foco.
-- Modo activo (con un distintivo de color) y `rationale`, la explicación textual de la decisión, por ejemplo `seal chokepoint (3,14): opp room 21 < len 43`.
-- Barras de utilidad de los cuatro modos, con el modo elegido resaltado.
-- Rendimiento: ms de la última decisión, media y máximo; ms del tick completo; nodos A\*; longitud y coste de la ruta.
-- Territorio: barra de control del agente con foco frente al rival, número de celdas, cuellos de botella detectados y cuántos son letales.
-- Leyenda de símbolos y controles.
+- Both snakes with their lengths; an arrow marks the focused one.
+- Active mode (with a color badge) and `rationale`, the textual explanation of the decision, for example `seal chokepoint (3,14): opp room 21 < len 43`.
+- Utility bars for the four modes, with the chosen mode highlighted.
+- Performance: ms of the last decision, mean and max; ms of the full tick; A\* nodes; path length and cost.
+- Territory: control bar of the focused agent against the rival, cell counts, detected chokepoints and how many of them are lethal.
+- Legend of symbols and controls.
 
-Si el foco está en un agente que no publica traza (`GreedyAgent` o el jugador humano), el HUD lo indica y sugiere cambiar de foco.
+If the focus is on an agent that publishes no trace (`GreedyAgent` or the human player), the HUD says so and suggests switching focus.
 
-**Controles de depuración:** `[1]/[2]` cambian el foco, `[SPACE]` pausa, `[N]` avanza un tick en pausa, `[R]` reinicia la partida con la misma semilla (en modo espectador, si la partida ya terminó, salta la pausa y empieza la siguiente ronda), `[+]/[-]` cambian la velocidad de simulación (2 a 60 ticks/s), `[ESC]` sale. En `play`, el jugador se mueve con las flechas o WASD y el búfer de entrada reparte dos giros rápidos en dos ticks consecutivos.
+**Debug controls:** `[1]/[2]` switch focus, `[SPACE]` pauses, `[N]` steps one tick while paused, `[R]` restarts the match with the same seed (in spectator mode, once the match is over, it skips the pause and starts the next round), `[+]/[-]` change the simulation speed (2 to 60 ticks/s), `[ESC]` quits. In `play`, the player moves with the arrow keys or WASD, and the input buffer spreads two quick turns over two consecutive ticks.
 
-**Técnicas de renderizado:**
+**Rendering techniques:**
 
-- El tablero base (fondo, cuadrícula y muros) se dibuja una sola vez.
-- Los tintes de Voronoi son *tiles* `SRCALPHA` precalculados por dueño, que se componen con `Surface.fblits`.
-- La capa de territorio se reconstruye solo cuando cambia la traza (una vez por tick, no por fotograma).
-- El HUD se vuelve a dibujar solo cuando cambian sus datos.
-- La simulación avanza con un acumulador de paso fijo, con un máximo de 5 ticks de recuperación por fotograma para evitar la espiral de muerte.
+- The base board (background, grid and walls) is drawn once.
+- Voronoi tints are precomputed `SRCALPHA` tiles per owner, composited with `Surface.fblits`.
+- The territory layer is only rebuilt when the trace changes (once per tick, not per frame).
+- The HUD is only redrawn when its data changes.
+- The simulation advances with a fixed-timestep accumulator, capped at 5 catch-up ticks per frame to avoid the spiral of death.
 
-### Modo espectador: IA contra IA
+### Spectator mode: AI vs AI
 
-`snake-arena watch` enfrenta a dos agentes autónomos (`aggressive` o `greedy`, incluido el duelo espejo `aggressive` contra `aggressive`) en una serie de partidas sin intervención humana.
+`snake-arena watch` pits two autonomous agents (`aggressive` or `greedy`, including the `aggressive` vs `aggressive` mirror duel) against each other in a series of matches with no human input.
 
-- **Reinicio automático.** Al terminar una partida, `MatchSeries` registra el resultado, espera la pausa configurada (`--delay-restart`, de 1 a 2 s) y reinicia el tablero con la semilla siguiente (`seed + ronda`). Con `--rounds N` se detiene tras N partidas; por defecto la serie no termina.
-- **Marcador persistente** (tercera columna): ronda actual y cuenta atrás, victorias y porcentaje de cada agente, empates, duración media en ticks, mezcla de tácticas de cada agente ofensivo (incluida la partida en curso) y los 12 últimos resultados.
-- **Foco sin perder el mapa.** Dos IAs ofensivas publican exactamente la misma partición de Voronoi, porque el algoritmo es simétrico respecto al orden de las fuentes (lo comprueba `test_mirror_agents_publish_the_same_voronoi_partition`). Por eso el tinte territorial no cambia al alternar el foco; lo que cambia son la ruta A\*, el objetivo previsto del rival, el vector de intercepción y los cuellos de botella, que pertenecen al agente enfocado. Si el foco está en un agente sin traza, el mapa se toma de la traza del otro.
-- **Desacoplamiento.** `MatchSeries` vive en `engine/`, no importa `pygame` y se prueba sin ventana. El motor nunca asume que haya teclado: la vista solo le pasa el tiempo transcurrido y las órdenes de pausa o reinicio.
+- **Automatic restart.** When a match ends, `MatchSeries` records the result, waits for the configured pause (`--delay-restart`, 1 to 2 s) and resets the board with the next seed (`seed + round`). With `--rounds N` it stops after N matches; by default the series never ends.
+- **Persistent scoreboard** (third column): current round and countdown, wins and win rate of each agent, draws, mean duration in ticks, tactic mix of each offensive agent (including the match in progress) and the last 12 results.
+- **Switching focus without losing the map.** Two offensive AIs publish exactly the same Voronoi partition, because the algorithm is symmetric with respect to the order of the sources (checked by `test_mirror_agents_publish_the_same_voronoi_partition`). That is why the territory tint does not change when switching focus; what changes are the A\* path, the rival's predicted goal, the interception vector and the chokepoints, which belong to the focused agent. If the focus is on an agent without a trace, the map comes from the other agent's trace.
+- **Decoupling.** `MatchSeries` lives in `engine/`, does not import `pygame` and is tested without a window. The engine never assumes there is a keyboard: the view only passes it the elapsed time and pause or restart commands.
 
-![Duelo espejo en modo espectador](docs/img/watch-mirror.png)
+![Mirror duel in spectator mode](docs/img/watch-mirror.png)
 
-*Duelo espejo (semilla 3, tick 228 de la ronda 4): el foco está en #2, que corta la ruta prevista de #1 en (6,21) con 2 ticks de ventaja. La columna derecha muestra el marcador 1-2 y la mezcla de tácticas de cada IA.*
+*Mirror duel (seed 3, tick 228 of round 4): the focus is on #2, which cuts #1's predicted route at (6,21) with a 2-tick lead. The right column shows the 1-2 score and each AI's tactic mix.*
 
-### Capturas de partidas reales
+### Screenshots from real matches
 
-Las dos capturas son de partidas reales contra `GreedyAgent` y se generaron con el driver `dummy` de SDL.
+Both screenshots come from real matches against `GreedyAgent` and were generated with SDL's `dummy` driver.
 
-**Corte letal (semilla 4, tick 701).** La IA (roja) sella el pasillo en (3,14). El rival, de longitud 43, queda encerrado con 21 celdas. El HUD marca 3 cortes letales y un 98 % de control territorial.
+**Lethal cut (seed 4, tick 701).** The AI (red) seals the corridor at (3,14). The rival, of length 43, is trapped with 21 cells. The HUD shows 3 lethal cuts and 98% territorial control.
 
-![Corte letal](docs/img/lethal-cut-tick701.png)
+![Lethal cut](docs/img/lethal-cut-tick701.png)
 
-**Modo `INTERCEPT` (semilla 0, tick 110).** El vector discontinuo une la cabeza de la IA con el punto de corte (16,18), situado sobre la ruta prevista del rival (puntos azules) hacia la comida marcada con el anillo. La ventaja es 0 porque la IA es más larga y ganaría el choque frontal.
+**`INTERCEPT` mode (seed 0, tick 110).** The dashed vector joins the AI's head to the cut point (16,18), which lies on the rival's predicted route (blue dots) to the food marked with the ring. The lead is 0 because the AI is longer and would win the head-on collision.
 
-![Modo INTERCEPT](docs/img/intercept-mode.png)
+![INTERCEPT mode](docs/img/intercept-mode.png)
 
 ---
 
-## 5. Grabación y exportación de repeticiones
+## 5. Recording and exporting replays
 
-`snake-arena record` juega una partida completa sin abrir ninguna ventana y la exporta a GIF o MP4 con los mismos overlays y el mismo HUD que la vista interactiva.
+`snake-arena record` plays a full match without opening any window and exports it to GIF or MP4 with the same overlays and HUD as the interactive view.
 
 ```bash
 snake-arena record --agent-1 aggressive --agent-2 greedy --output assets/showcase.gif
@@ -389,124 +426,124 @@ snake-arena record --seed 2 --highlight-lethal --output assets/showcase.mp4
 snake-arena record --overlays voronoi --cell 14 --tick-rate 12 --output clips/voronoi.gif
 ```
 
-### Pipeline en streaming
+### Streaming pipeline
 
 ```
-engine.tick() --> SceneRenderer.draw(Surface fuera de pantalla, mismo tamaño que la vista)
-              --> pygame.image.tobytes(surface, "RGB")          un único búfer de w·h·3 bytes
+engine.tick() --> SceneRenderer.draw(off-screen Surface, same size as the view)
+              --> pygame.image.tobytes(surface, "RGB")          a single w·h·3-byte buffer
               --> FrameWriter.write(bytes, repeat=n)
-                    |-- GifWriter: paleta global -> delta con índice transparente -> GifImagePlugin.getdata() -> disco
-                    +-- Mp4Writer: tubería a ffmpeg (libx264, yuv420p) a través de imageio-ffmpeg
+                    |-- GifWriter: global palette -> delta with transparent index -> GifImagePlugin.getdata() -> disk
+                    +-- Mp4Writer: pipe to ffmpeg (libx264, yuv420p) through imageio-ffmpeg
 ```
 
-- **Sin display.** La CLI fija `SDL_VIDEODRIVER=dummy` antes de cargar Pygame y el grabador solo inicializa `pygame.font`, nunca `pygame.display`. No necesita servidor gráfico: está pensado para CI de Linux, aunque de momento solo se ha verificado en Windows con el driver `dummy`.
-- **Mismo fotograma que la vista.** `SceneRenderer` compone tablero, cartel y HUD tanto para la ventana (`ArenaApp`) como para la Surface fuera de pantalla (`MatchRecorder`), así que no hay dos implementaciones del render que puedan divergir. El tamaño se redondea a dimensiones pares, que H.264 exige.
-- **Memoria constante.** En memoria solo hay una Surface de trabajo, el búfer del fotograma actual y, en GIF, el fotograma anterior ya indexado (un byte por píxel) para calcular el delta. Pico de memoria del proceso medido en Windows: **82 MB** para un GIF de 53 fotogramas y **82 MB** para uno de 593; 67 MB para el MP4 de 593. Acumular esos 593 fotogramas en RGB supondría unos 1,2 GB.
+- **No display.** The CLI sets `SDL_VIDEODRIVER=dummy` before loading Pygame, and the recorder only initializes `pygame.font`, never `pygame.display`. It needs no display server: it is meant for Linux CI, although so far it has only been verified on Windows with the `dummy` driver.
+- **Same frame as the view.** `SceneRenderer` composes the board, banner and HUD both for the window (`ArenaApp`) and for the off-screen Surface (`MatchRecorder`), so there are no two render implementations that could drift apart. The size is rounded up to even dimensions, which H.264 requires.
+- **Constant memory.** Memory only holds one working Surface, the buffer of the current frame and, for GIF, the previous frame already indexed (one byte per pixel) to compute the delta. Peak process memory measured on Windows: **82 MB** for a 53-frame GIF and **82 MB** for a 593-frame one; 67 MB for the 593-frame MP4. Keeping those 593 frames in RGB would take about 1.2 GB.
 
-### Por qué el GIF no usa `imageio`
+### Why the GIF does not use `imageio`
 
-El plugin `pillow` de `imageio` guarda cada fotograma en `self.images_to_write` y solo escribe el fichero al cerrarlo. `Image.save(save_all=True)` de Pillow también acumula todos los fotogramas en `im_frames` antes de codificar. Las dos opciones incumplen el requisito de streaming.
+The `pillow` plugin of `imageio` stores every frame in `self.images_to_write` and only writes the file when it is closed. Pillow's `Image.save(save_all=True)` also collects every frame in `im_frames` before encoding. Both options break the streaming requirement.
 
-`GifWriter` escribe el GIF89a fotograma a fotograma con dos primitivas públicas de Pillow:
+`GifWriter` writes the GIF89a frame by frame with two public Pillow primitives:
 
-- `GifImagePlugin.getheader()`: cabecera, paleta global y bucle NETSCAPE;
-- `GifImagePlugin.getdata()`: la compresión LZW de cada fotograma.
+- `GifImagePlugin.getheader()`: header, global palette and NETSCAPE loop;
+- `GifImagePlugin.getdata()`: LZW compression of each frame.
 
-El MP4 usa directamente `imageio-ffmpeg`, que es el backend de vídeo del propio `imageio`. Recibe `bytes` sin necesidad de `numpy`. Las dependencias opcionales quedan reducidas a `pillow` e `imageio-ffmpeg` (extra `[record]`).
+The MP4 uses `imageio-ffmpeg` directly, which is `imageio`'s own video backend. It accepts `bytes` without needing `numpy`. The optional dependencies come down to `pillow` and `imageio-ffmpeg` (the `[record]` extra).
 
-### Paleta y tamaño del GIF
+### GIF palette and size
 
-**Paleta global** de 255 colores más el índice 255 reservado para la transparencia. Se calcula una sola vez a partir de una muestra:
+**Global palette** of 255 colors plus index 255, reserved for transparency. It is computed once from a sample:
 
-- el primer fotograma con trazas;
-- ese mismo fotograma bajo el velo del cartel de resultado;
-- ese mismo fotograma con la marca de replay;
-- una tira con todos los colores del tema (sólidos, velados y como texto con antialiasing).
+- the first frame with traces;
+- that same frame under the veil of the result banner;
+- that same frame with the replay marker;
+- a strip with every theme color (solid, veiled and as antialiased text).
 
-Así la paleta cubre colores que todavía no han aparecido, como la serpiente muerta o el velo final.
+This way the palette covers colors that have not appeared yet, such as the dead snake or the final veil.
 
-**Método de cuantización elegido por medición** sobre fotogramas reales (ticks 0, 1 y 400 y el fotograma final):
+**Quantization method chosen by measurement** on real frames (ticks 0, 1 and 400 and the final frame):
 
-| Método | Error máximo por canal (0–255) | Píxeles con error > 16 en el tick 400 |
+| Method | Max error per channel (0–255) | Pixels with error > 16 at tick 400 |
 |---|---:|---:|
-| `MEDIANCUT` | 26 – 32 | 0,444 % |
-| **`MAXCOVERAGE`** (elegido) | **10 – 16** | **0 %** |
+| `MEDIANCUT` | 26 – 32 | 0.444% |
+| **`MAXCOVERAGE`** (chosen) | **10 – 16** | **0%** |
 
-**Sin dithering.** En gráficos planos, el tramado solo añade ruido y empeora la compresión LZW.
+**No dithering.** On flat graphics, dithering only adds noise and hurts LZW compression.
 
-**Fotogramas delta.** Cada fotograma se compara con el anterior a nivel de índice de paleta. Los píxeles sin cambios pasan al índice transparente (*disposal* 1) y el fotograma se recorta al rectángulo que cambió. Los fotogramas consecutivos idénticos se fusionan en uno con el retardo sumado: en el vídeo de muestra, 373 fotogramas lógicos quedan en 315 codificados.
+**Delta frames.** Each frame is compared with the previous one at the palette-index level. Unchanged pixels become the transparent index (*disposal* 1), and the frame is cropped to the rectangle that changed. Identical consecutive frames are merged into one with the summed delay: in the showcase video, 373 logical frames become 315 encoded ones.
 
-**Retardos exactos.** GIF mide los retardos en centésimas de segundo. Se redondean de forma acumulada: a 15 fps los fotogramas duran 7, 6 y 7 cs, y la media es exacta. Los navegadores fuerzan a 10 cs cualquier retardo menor de 2 cs, por eso la CLI limita la tasa a 1–50 fps.
+**Exact delays.** GIF measures delays in hundredths of a second. They are rounded cumulatively: at 15 fps the frames last 7, 6 and 7 cs, and the average is exact. Browsers force any delay under 2 cs up to 10 cs, which is why the CLI limits the rate to 1–50 fps.
 
-### Determinismo total
+### Full determinism
 
-- Lo único no determinista de un fotograma eran los milisegundos medidos con el reloj real. En las grabaciones, el HUD los sustituye por `timing: omitted: bit-exact replay`.
-- **GIF:** la misma semilla y los mismos agentes producen un fichero idéntico byte a byte. Las dos ejecuciones de la muestra tienen el mismo SHA-256, `d48df97599c34bfa…`, y un test lo comprueba en pequeño.
-- **MP4:** con `-fflags +bitexact -flags:v +bitexact -map_metadata -1`, dos codificaciones también son idénticas byte a byte (test incluido).
-- `test_same_seed_and_agents_render_identical_frames` compara el SHA-256 de cada fotograma entre dos grabaciones.
+- The only non-deterministic content of a frame was the milliseconds measured with the real clock. In recordings, the HUD replaces them with `timing: omitted: bit-exact replay`.
+- **GIF:** the same seed and agents produce a byte-for-byte identical file. Both runs of the showcase have the same SHA-256, `d48df97599c34bfa…`, and a test checks it at a small scale.
+- **MP4:** with `-fflags +bitexact -flags:v +bitexact -map_metadata -1`, two encodings are also byte-for-byte identical (test included).
+- `test_same_seed_and_agents_render_identical_frames` compares the SHA-256 of every frame between two recordings.
 
-### Replay del corte letal (`--highlight-lethal`)
+### Lethal-cut replay (`--highlight-lethal`)
 
-1. En cada tick, el grabador comprueba si algún agente está en `CONSTRICT` con `DecisionTrace.lethal_cut` y copia ese fotograma a una Surface reservada, una por agente. La memoria sigue siendo constante.
-2. Al final, la partida **se decidió por corte letal** si se cumplen tres condiciones: el ganador tenía un sellado letal, el perdedor murió contra pared, cuerpo o sí mismo (no en un choque frontal), y murió como mucho 150 ticks después del sellado.
-3. En ese caso, el vídeo congela 2,5 s el fotograma decisivo con anillos alrededor del cuello de botella y una banda `REPLAY LETHAL CUT` con el `rationale` de la IA. Después muestra el resultado final durante 1,5 s.
-4. Sin el flag, la CLI informa de que la partida terminó por corte letal y sugiere usarlo.
+1. On every tick, the recorder checks whether an agent is in `CONSTRICT` with a `DecisionTrace.lethal_cut` and copies that frame into a reserved Surface, one per agent. Memory stays constant.
+2. At the end, the match **was decided by a lethal cut** if three conditions hold: the winner had a lethal seal, the loser died against a wall, a body or itself (not in a head-on collision), and it died at most 150 ticks after the seal.
+3. In that case, the video freezes the decisive frame for 2.5 s, with rings around the chokepoint and a `REPLAY LETHAL CUT` ribbon showing the AI's `rationale`. It then shows the final result for 1.5 s.
+4. Without the flag, the CLI reports that the match ended with a lethal cut and suggests using it.
 
-### Resultados medidos
+### Measured results
 
-| Grabación | Fotogramas | Duración | GIF | MP4 | Render GIF / MP4 |
+| Recording | Frames | Duration | GIF | MP4 | Render GIF / MP4 |
 |---|---:|---:|---:|---:|---:|
-| Muestra (semilla 2, con replay) | 373 | 24,9 s | 1,86 MB | 0,89 MB | 5,3 s / 3,4 s |
-| Duelo espejo largo (semilla 0, 570 ticks) | 593 | 39,5 s | 3,10 MB | 1,43 MB | 10,5 s / 7,6 s |
-| Partida corta (30 ticks) | 53 | 3,5 s | 0,19 MB | — | 0,7 s / — |
+| Showcase (seed 2, with replay) | 373 | 24.9 s | 1.86 MB | 0.89 MB | 5.3 s / 3.4 s |
+| Long mirror duel (seed 0, 570 ticks) | 593 | 39.5 s | 3.10 MB | 1.43 MB | 10.5 s / 7.6 s |
+| Short match (30 ticks) | 53 | 3.5 s | 0.19 MB | — | 0.7 s / — |
 
-Resolución de 1022×682 a 15 fps, en la misma máquina que el benchmark (Ryzen 7 5700X, Windows 11).
+1022×682 resolution at 15 fps, on the same machine as the benchmark (Ryzen 7 5700X, Windows 11).
 
 ---
 
-## 6. Trade-offs y decisiones de diseño
+## 6. Trade-offs and design decisions
 
-### Retraso de 1 tick en los overlays frente a latencia de entrada
+### 1-tick overlay lag vs input latency
 
-La traza que se dibuja en el fotograma $t$ se calculó sobre el estado $t-1$: es la decisión que produjo el estado visible. Para mostrar la decisión sobre el estado actual habría que llamar a `decide()` justo después de cada tick. En el caso del humano, eso significa leer el teclado antes de que el jugador reaccione al nuevo estado, lo que añade un tick de latencia a su entrada. La otra opción, tratar al humano como caso especial, rompe la uniformidad del patrón Strategy.
+The trace drawn on frame $t$ was computed on state $t-1$: it is the decision that produced the visible state. Showing the decision for the current state would require calling `decide()` right after every tick. For the human, that means reading the keyboard before the player can react to the new state, which adds one tick of latency to their input. The other option, treating the human as a special case, breaks the uniformity of the Strategy pattern.
 
-**Decisión:** priorizar que la entrada del jugador no tenga latencia añadida. La ruta A\* se reancla a la cabeza actual (se omite `planned_path[0]` cuando coincide con ella), así que el desfase solo se nota en la partición de Voronoi, un tick por detrás. A 10 ticks/s son 100 ms.
+**Decision:** keep the player's input free of added latency. The A\* path is re-anchored to the current head (`planned_path[0]` is skipped when it matches it), so the lag only shows in the Voronoi partition, one tick behind. At 10 ticks/s that is 100 ms.
 
-### Corte letal estático frente a persecución de cola
+### Static lethal cut vs tail chasing
 
-`cut_area` se calcula sobre las celdas libres ahora mismo ($\tau = 0$), y el criterio es el de la especificación: espacio < longitud. No tiene en cuenta que el cuerpo del rival libera celdas mientras avanza. Una serpiente encerrada en un bolsillo que contenga un ciclo podría sobrevivir persiguiendo su cola aunque su espacio sea menor que su longitud.
+`cut_area` is computed on the cells that are free right now ($\tau = 0$), and the criterion is the one in the specification: space < length. It ignores that the rival's body frees cells as it moves. A snake trapped in a pocket that contains a cycle could survive by chasing its tail even though its space is smaller than its length.
 
-- **Coste de un falso positivo:** unos pocos ticks en `CONSTRICT` sin matar. La IA no se arriesga, porque el corte exige además que *ella* tenga espacio $\ge L_{IA}$ desde el punto de corte.
-- **Alternativa descartada:** simular el bolsillo con el modelo temporal para cada candidato. Costaría un BFS temporal por punto de articulación, frente a la pasada única de Tarjan. Con un presupuesto medio del 3 – 5 % sería asumible, así que queda como mejora futura.
+- **Cost of a false positive:** a few ticks in `CONSTRICT` without a kill. The AI takes no risk, because the cut also requires *the AI itself* to have space $\ge L_{AI}$ from the cut point.
+- **Discarded alternative:** simulating the pocket with the temporal model for each candidate. It would cost one temporal BFS per articulation point, versus Tarjan's single pass. With a mean budget use of 3 – 5% it would be affordable, so it remains a future improvement.
 
-### Otras decisiones
+### Other decisions
 
-| Decisión | Alternativa | Motivo |
+| Decision | Alternative | Reason |
 |---|---|---|
-| Cuerpo como `tuple` inmutable (avanzar es $O(L)$) | `deque` mutable ($O(1)$) | El determinismo y los snapshots compartidos valen más. $O(L)$ por tick es despreciable frente a las ~15 pasadas $O(V)$ de la IA. `deque` se usa donde importa: la cola del BFS y el búfer de entrada. |
-| Crecimiento diferido (como Battlesnake) | Crecer en el mismo tick en que se come | Al empezar cada tick ya se sabe qué colas se liberan, sin depender de quién coma. Esto hace posible el modelo $\tau(c)$. |
-| Empates de Voronoi para la serpiente más larga | Marcarlos siempre como neutrales | Es coherente con la regla de choque frontal: la celda es de quien ganaría la colisión. |
-| A\* con $w = 1.25$ | A\* óptimo ($w = 1$) | Menos nodos expandidos a cambio de rutas como mucho un 25 % más largas. Un test verifica la cota de suboptimalidad $\text{coste} \le w \cdot \text{óptimo}$ (con $w = 2$). |
-| El engine mide la latencia, no el agente | Que el agente informe de su propio tiempo | Un agente no puede falsear sus métricas y todos se miden igual. |
-| Tarjan iterativo | Tarjan recursivo | El DFS puede tener tantos niveles como celdas; con 925 roza el límite de recursión de CPython (1.000 por defecto). |
-| GIF escrito en streaming con `getheader`/`getdata` de Pillow | `imageio` o `Image.save(save_all=True)` | Ambos acumulan todos los fotogramas hasta cerrar. El streaming mantiene la memoria constante (82 MB con 53 o con 593 fotogramas). |
-| Paleta global `MAXCOVERAGE` sin dithering | Paleta por fotograma o `MEDIANCUT` con tramado | Una paleta común permite deltas por índice y transparencia; `MAXCOVERAGE` dio el menor error máximo medido. |
-| Latencias ocultas en el HUD de las grabaciones | Mostrar los ms reales | Son el único contenido no determinista del fotograma; ocultarlas hace el vídeo reproducible byte a byte. |
-| Replay del fotograma decisivo al final | Ralentizar los últimos fotogramas en directo | En streaming no se puede saber de antemano qué sellado será decisivo; guardar solo ese fotograma cuesta una Surface. |
+| Body as an immutable `tuple` (advancing is $O(L)$) | Mutable `deque` ($O(1)$) | Determinism and shared snapshots are worth more. $O(L)$ per tick is negligible next to the AI's ~15 $O(V)$ passes. `deque` is used where it matters: the BFS queue and the input buffer. |
+| Deferred growth (as in Battlesnake) | Growing on the same tick the food is eaten | At the start of every tick it is already known which tails will move, regardless of who eats. This is what makes the $\tau(c)$ model possible. |
+| Voronoi ties go to the longer snake | Always marking them neutral | It is consistent with the head-on rule: the cell belongs to whoever would win the collision. |
+| A\* with $w = 1.25$ | Optimal A\* ($w = 1$) | Fewer expanded nodes in exchange for paths at most 25% longer. A test checks the suboptimality bound $\text{cost} \le w \cdot \text{optimal}$ (with $w = 2$). |
+| The engine measures latency, not the agent | Agents report their own time | An agent cannot fake its metrics, and every agent is measured the same way. |
+| Iterative Tarjan | Recursive Tarjan | The DFS can be as deep as there are cells; with 925 it brushes against CPython's recursion limit (1,000 by default). |
+| GIF streamed with Pillow's `getheader`/`getdata` | `imageio` or `Image.save(save_all=True)` | Both keep every frame until closing. Streaming keeps memory constant (82 MB with either 53 or 593 frames). |
+| Global `MAXCOVERAGE` palette without dithering | Per-frame palette or `MEDIANCUT` with dithering | A shared palette enables index-level deltas and transparency; `MAXCOVERAGE` gave the lowest measured maximum error. |
+| Latencies hidden in the recording HUD | Showing the real ms | They are the only non-deterministic content of the frame; hiding them makes the video reproducible byte for byte. |
+| Replay of the decisive frame at the end | Slowing down the last frames live | While streaming, there is no way to know in advance which seal will be decisive; keeping only that frame costs one Surface. |
 
-### Trabajo futuro
+### Future work
 
-- Persecución de cola por la ruta **más larga** (supervivencia al final de la partida, donde ocurren las muertes restantes de la IA).
-- Análisis de cortes con el modelo temporal (ver arriba).
-- Anticipación con minimax o MCTS a poca profundidad, usando `rules.step` puro como modelo de transición.
+- Tail chasing along the **longest** path (endgame survival, where the AI's remaining deaths happen).
+- Cut analysis with the temporal model (see above).
+- Shallow minimax or MCTS lookahead, using the pure `rules.step` as the transition model.
 
 ---
 
-## 7. Instalación y reproducibilidad
+## 7. Installation and reproducibility
 
-Requisitos: Python ≥ 3.11 (desarrollado y medido con 3.12.10). La única dependencia de ejecución es `pygame-ce` ≥ 2.5. Para exportar vídeo hace falta el extra `[record]` (`pillow` e `imageio-ffmpeg`, que incluye un binario de ffmpeg). Si falta, `snake-arena record` termina con código 2 e indica el comando de instalación.
+Requirements: Python ≥ 3.11 (developed and measured with 3.12.10). The only runtime dependency is `pygame-ce` ≥ 2.5. Exporting video requires the `[record]` extra (`pillow` and `imageio-ffmpeg`, which ships an ffmpeg binary). Without it, `snake-arena record` exits with code 2 and prints the install command.
 
-### Entorno virtual
+### Virtual environment
 
 **Windows (PowerShell):**
 
@@ -524,57 +561,57 @@ source .venv/bin/activate
 python -m pip install -e ".[dev,record]"
 ```
 
-Sin `record`, los tests de exportación que necesitan Pillow o ffmpeg se marcan como omitidos (`pytest.importorskip`) en lugar de fallar.
+Without `record`, the export tests that need Pillow or ffmpeg are reported as skipped (`pytest.importorskip`) instead of failing.
 
-### Verificación
+### Verification
 
 ```bash
-pytest          # 105 tests; la vista y la grabación se prueban con SDL_VIDEODRIVER=dummy
-mypy            # modo --strict sobre src/ y tests/ (configurado en pyproject.toml)
+pytest          # 105 tests; the view and the recorder are tested with SDL_VIDEODRIVER=dummy
+mypy            # --strict mode over src/ and tests/ (configured in pyproject.toml)
 ```
 
-| Fichero | Tests | Qué cubre |
+| File | Tests | What it covers |
 |---|---:|---|
-| `test_rules.py` | 16 | Colisiones: pared, propia, cuerpo, frontal, cruce de cabezas, cola que se libera, crecimiento diferido, simultaneidad |
-| `test_flood.py` | 7 | BFS temporal, rodeos, reconstrucción de rutas, Voronoi (franja neutral, desempate por longitud, salida tardía, bloqueo por cuerpos) |
-| `test_astar.py` | 6 | Optimalidad, obstáculos, telemetría sin ruta, penalizaciones, meta temporal, cota de A\* ponderado |
-| `test_cli.py` | 11 | `watch` (valores por defecto, duelo espejo, pausas fuera de 1–2 s, rondas ≤ 0, agentes no válidos), `record` (flags, formato desconocido, GIF de extremo a extremo, dependencia ausente con código 2), `bench` espejo |
-| `test_record_export.py` | 11 | Formato por extensión o forzado, dependencias ausentes con el comando de instalación, MP4 decodificable con todos los fotogramas e idéntico byte a byte, tamaños impares rechazados |
-| `test_gif_writer.py` | 8 | Ida y vuelta exacta de píxeles, regiones delta mínimas, fusión de fotogramas idénticos, retardos a 15 fps (7/6/7 cs), GIF idéntico byte a byte, paleta sin colores espurios, calibración obligatoria, fps fuera de rango |
-| `test_recorder.py` | 7 | Writer simulado que solo guarda el SHA-256 de cada fotograma: un fotograma RGB por tick, pausa final, determinismo fotograma a fotograma, presets de overlays, replay del corte letal (con y sin flag), `--max-ticks` |
-| `test_ai.py` | 6 | Sellado de corte letal, rechazo del choque frontal desfavorable, sin suicidios, traza completa, Voronoi idéntico en el duelo espejo, determinismo |
-| `test_series.py` | 6 | Registro único por partida, pausa antes de reiniciar, semilla siguiente, fin tras N rondas, reinicio manual, mezcla de tácticas en vivo sin doble conteo |
-| `test_engine.py` | 5 | Reproducibilidad por semilla, reloj inyectado, límite de ticks, `reset`, informe del benchmark |
-| `test_articulation.py` | 4 | Pasillos, rejilla abierta, puerta entre salas, raíz ocupada |
-| `test_occupancy.py` | 4 | $\tau(c)$ frente a `rules.step`, celdas amenazadas por el rival |
-| `test_view_smoke.py` | 3 | Modo `play` con overlays y pausa, serie de 2 rondas con reinicio automático, cambio de foco que conserva el mapa de Voronoi |
-| `test_snake.py`, `test_grid.py`, `test_human.py`, `test_agents.py` | 11 | Modelo de dominio, búfer de entrada, patrón Strategy |
+| `test_rules.py` | 16 | Collisions: wall, self, body, head-on, head swap, freed tail, deferred growth, simultaneity |
+| `test_flood.py` | 7 | Temporal BFS, detours, path reconstruction, Voronoi (neutral band, length tie-break, late start, blocking bodies) |
+| `test_astar.py` | 6 | Optimality, obstacles, telemetry without a path, penalties, temporal goal, weighted A\* bound |
+| `test_cli.py` | 11 | `watch` (defaults, mirror duel, pauses outside 1–2 s, rounds ≤ 0, invalid agents), `record` (flags, unknown format, end-to-end GIF, missing dependency with code 2), mirror `bench` |
+| `test_record_export.py` | 11 | Format from the extension or forced, missing dependencies with the install command, decodable MP4 with every frame and byte-for-byte identical, odd sizes rejected |
+| `test_gif_writer.py` | 8 | Exact pixel round trip, minimal delta regions, merging of identical frames, delays at 15 fps (7/6/7 cs), byte-for-byte identical GIF, palette without spurious colors, mandatory calibration, out-of-range fps |
+| `test_recorder.py` | 7 | Mock writer that only stores the SHA-256 of each frame: one RGB frame per tick, final hold, frame-by-frame determinism, overlay presets, lethal-cut replay (with and without the flag), `--max-ticks` |
+| `test_ai.py` | 6 | Sealing a lethal cut, refusing a losing head-on collision, no suicides, complete trace, identical Voronoi in the mirror duel, determinism |
+| `test_series.py` | 6 | One record per match, pause before restarting, next seed, stop after N rounds, manual restart, live tactic mix without double counting |
+| `test_engine.py` | 5 | Reproducibility by seed, injected clock, tick limit, `reset`, benchmark report |
+| `test_articulation.py` | 4 | Corridors, open grid, door between rooms, occupied root |
+| `test_occupancy.py` | 4 | $\tau(c)$ against `rules.step`, cells threatened by the rival |
+| `test_view_smoke.py` | 3 | `play` mode with overlays and pause, 2-round series with automatic restart, focus switch that keeps the Voronoi map |
+| `test_snake.py`, `test_grid.py`, `test_human.py`, `test_agents.py` | 11 | Domain model, input buffer, Strategy pattern |
 
-### Benchmark headless
+### Headless benchmark
 
 ```bash
-snake-arena bench --games 20 --seed 0                                # baseline (#1) contra la IA (#2)
-snake-arena bench --games 20 --agent-1 aggressive --agent-2 aggressive  # duelo espejo
+snake-arena bench --games 20 --seed 0                                # baseline (#1) vs the AI (#2)
+snake-arena bench --games 20 --agent-1 aggressive --agent-2 aggressive  # mirror duel
 ```
 
-La misma semilla produce siempre las mismas victorias, muertes y reparto de modos; solo cambian las latencias.
+The same seed always produces the same wins, deaths and mode mix; only the latencies change.
 
-### Partida interactiva
+### Interactive match
 
 ```bash
-snake-arena play                                   # tú (azul) contra la IA (roja)
+snake-arena play                                   # you (blue) vs the AI (red)
 snake-arena play --arena open --size 25 --seed 7
 ```
 
-### Modo espectador
+### Spectator mode
 
 ```bash
-snake-arena watch                                              # greedy vs aggressive, serie sin fin
-snake-arena watch --agent-1 aggressive --agent-2 aggressive   # duelo espejo
+snake-arena watch                                              # greedy vs aggressive, endless series
+snake-arena watch --agent-1 aggressive --agent-2 aggressive   # mirror duel
 snake-arena watch --rounds 10 --delay-restart 2 --tick-rate 20
 ```
 
-### Grabación sin ventana
+### Headless recording
 
 ```bash
 snake-arena record --seed 2 --highlight-lethal --output assets/showcase.gif
@@ -582,20 +619,20 @@ snake-arena record --seed 2 --highlight-lethal --output assets/showcase.mp4
 snake-arena record --format gif --overlays chokepoints --max-ticks 600 --output clips/cuts.bin
 ```
 
-| Opción | Comandos | Valores | Por defecto |
+| Option | Commands | Values | Default |
 |---|---|---|---|
 | `--agent-1`, `--agent-2` | `watch`, `record`, `bench` | `aggressive`, `greedy` | `greedy`, `aggressive` |
-| `--rounds` | `watch` | número de partidas ≥ 1 | sin fin |
-| `--delay-restart` | `watch` | pausa tras el fin de partida, de 1 a 2 s | `1.5` |
-| `--output` | `record` | fichero de salida (crea los directorios que falten) | obligatorio |
-| `--format` | `record` | `gif`, `mp4` | según la extensión |
-| `--max-ticks` | `record` | límite de seguridad de la partida | `1500` |
+| `--rounds` | `watch` | number of matches ≥ 1 | endless |
+| `--delay-restart` | `watch` | pause after a match ends, 1 to 2 s | `1.5` |
+| `--output` | `record` | output file (missing directories are created) | required |
+| `--format` | `record` | `gif`, `mp4` | from the extension |
+| `--max-ticks` | `record` | safety limit on the match length | `1500` |
 | `--overlays` | `record` | `all`, `voronoi`, `chokepoints`, `none` | `all` |
-| `--highlight-lethal` | `record` | repite el corte letal si decidió la partida | desactivado |
-| `--games` | `bench` | número de partidas ≥ 1 | `20` |
-| `--tick-rate` | `play`, `watch`, `record` | ticks por segundo; en `record`, fps del vídeo (1–50) | `10` (`play`), `15` (`watch`, `record`) |
-| `--cell` | `play`, `watch`, `record` | tamaño de celda en píxeles | `22` |
-| `--arena` | todos | `cross`, `open` | `cross` |
-| `--size` | todos | lado del tablero en celdas | `31` |
-| `--food` | todos | comida simultánea en el tablero | `3` |
-| `--seed` | todos | semilla de la comida (en `watch` y `bench`, la de la primera ronda) | `0` |
+| `--highlight-lethal` | `record` | replays the lethal cut if it decided the match | off |
+| `--games` | `bench` | number of matches ≥ 1 | `20` |
+| `--tick-rate` | `play`, `watch`, `record` | ticks per second; in `record`, the video fps (1–50) | `10` (`play`), `15` (`watch`, `record`) |
+| `--cell` | `play`, `watch`, `record` | cell size in pixels | `22` |
+| `--arena` | all | `cross`, `open` | `cross` |
+| `--size` | all | board side in cells | `31` |
+| `--food` | all | food items on the board at the same time | `3` |
+| `--seed` | all | food seed (in `watch` and `bench`, the seed of the first round) | `0` |
