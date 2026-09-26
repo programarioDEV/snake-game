@@ -69,7 +69,7 @@ class HudPanel:
         if trace is None:
             y = self._line(self._no_trace_reason(m), self.small, t.text_dim, y)
             self._line("[1] / [2] switch the inspected snake", self.small, t.text_dim, y)
-            self._footer(m.toggles)
+            self._footer(m.toggles, m.paused)
             return self.surface
 
         y = self._header("TACTICAL STATE", y)
@@ -103,7 +103,7 @@ class HudPanel:
         y = self._pair("chokepoints", f"{len(trace.chokepoints)}  ({lethal} lethal)", y)
         y = self._rule(y + 2)
         self._legend(self.theme.snakes[m.rival], y)
-        self._footer(m.toggles)
+        self._footer(m.toggles, m.paused)
         return self.surface
 
     @staticmethod
@@ -202,7 +202,7 @@ class HudPanel:
         pygame.draw.polygon(s, t.lethal, [(cx, cy - 6), (cx + 6, cy), (cx, cy + 6), (cx - 6, cy)])
         self._line("lethal cut: room < rival length", self.small, t.text, y, text_x)
 
-    def _footer(self, toggles: tuple[bool, ...]) -> None:
+    def _footer(self, toggles: tuple[bool, ...], paused: bool) -> None:
         t = self.theme
         line = self.small.get_linesize()
         y = self.surface.get_height() - 4 * line - 14
@@ -211,7 +211,8 @@ class HudPanel:
             x = self.pad + (index % 2) * 150
             row = y + (index // 2) * line
             self._line(f"[{key}] {label}", self.small, t.text if on else t.text_dim, row, x)
-        self._line("[SPACE] pause [N] step [R] reset [+/-]", self.small, t.text_dim, y + 2 * line)
+        action = "resume" if paused else "pause "
+        self._line(f"[SPACE] {action} [N] step [R] reset [+/-] speed", self.small, t.text_dim, y + 2 * line)
         self._line("[1]/[2] focus  [TAB] all  [ESC] quit", self.small, t.text_dim, y + 3 * line)
 
     def _wrap(self, text: str, font: pygame.font.Font) -> list[str]:
