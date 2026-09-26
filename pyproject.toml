@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snake-arena"
+version = "0.1.0"
+description = "Asymmetric competitive Snake against an explainable offensive AI."
+requires-python = ">=3.11"
+dependencies = ["pygame-ce>=2.5"]
+
+[project.scripts]
+snake-arena = "snake_arena.__main__:main"
+
+[project.optional-dependencies]
+record = ["pillow>=10.1", "imageio-ffmpeg>=0.5"]
+dev = ["pytest>=8", "mypy>=1.10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+mypy_path = "src"
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["imageio_ffmpeg"]
+ignore_missing_imports = true
