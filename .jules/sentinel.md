@@ -1,0 +1,4 @@
+## 2026-10-03 - [Missing Input Length Limits (DoS risk)]
+**Vulnerability:** The application lacks upper bounds on input arguments like `--size`, `--food`, and `--cell`. This allows a user to provide maliciously large numbers (e.g. `--size 100000000`), which causes the application to allocate massive grids, resulting in an Out-of-Memory crash or hanging indefinitely.
+**Learning:** Argument parsers must not only ensure the correct data type or a minimum value, but also a reasonable maximum bound to prevent resource exhaustion attacks. Furthermore, uncaught exceptions bubble up as stack traces, exposing internal implementation details.
+**Prevention:** Implement rigorous boundary checking (both min and max limits) for all user-provided integers in CLI arguments and employ a global try-except block to gracefully handle unexpected application errors without leaking stack traces.
