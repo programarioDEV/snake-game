@@ -38,11 +38,29 @@ def _video_fps(text: str) -> int:
     return value
 
 
+def _board_size(text: str) -> int:
+    value = int(text)
+    if not 2 <= value <= 256:
+        raise argparse.ArgumentTypeError("must be between 2 and 256")
+    return value
+
+def _food_count(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return value
+
+def _cell_size(text: str) -> int:
+    value = int(text)
+    if not 1 <= value <= 100:
+        raise argparse.ArgumentTypeError("must be between 1 and 100")
+    return value
+
 def build_parser() -> argparse.ArgumentParser:
     board = argparse.ArgumentParser(add_help=False)
     board.add_argument("--arena", choices=sorted(ARENAS), default="cross")
-    board.add_argument("--size", type=int, default=31, help="board side in cells")
-    board.add_argument("--food", type=int, default=3, help="food items on the board")
+    board.add_argument("--size", type=_board_size, default=31, help="board side in cells")
+    board.add_argument("--food", type=_food_count, default=3, help="food items on the board")
     board.add_argument("--seed", type=int, default=0, help="food seed (watch/bench: first round)")
 
     rules = argparse.ArgumentParser(add_help=False)
@@ -56,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     display = argparse.ArgumentParser(add_help=False)
-    display.add_argument("--cell", type=int, default=22, help="cell size in pixels")
+    display.add_argument("--cell", type=_cell_size, default=22, help="cell size in pixels")
 
     matchup = argparse.ArgumentParser(add_help=False)
     matchup.add_argument("--agent-1", choices=sorted(AGENTS), default="greedy", help="blue snake")
