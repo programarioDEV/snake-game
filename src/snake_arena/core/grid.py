@@ -40,6 +40,8 @@ class Grid:
     def __post_init__(self) -> None:
         if self.width < 2 or self.height < 2:
             raise ValueError(f"grid must be at least 2x2, got {self.width}x{self.height}")
+        if self.width > 256 or self.height > 256:
+            raise ValueError(f"grid must be at most 256x256, got {self.width}x{self.height}")
         size = self.width * self.height
         if any(not 0 <= cell < size for cell in self.obstacles):
             raise ValueError("obstacle outside grid bounds")
