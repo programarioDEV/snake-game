@@ -84,7 +84,8 @@ class GifWriter:
         after = Image.frombytes("L", self.size, raw)
         changed = ImageChops.difference(before, after)
         bbox = changed.getbbox()
-        assert bbox is not None
+        if bbox is None:
+            raise RuntimeError("unexpected empty bbox")
         delta = Image.new("P", self.size, TRANSPARENT)
         delta.paste(indexed, mask=changed.point(_CHANGED))
         return delta.crop(bbox), (bbox[0], bbox[1]), True
