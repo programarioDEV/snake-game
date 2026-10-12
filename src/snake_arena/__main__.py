@@ -17,6 +17,20 @@ AGENTS: dict[str, Callable[[], BaseAgent]] = {
 }
 
 
+def _board_size(text: str) -> int:
+    value = int(text)
+    if not 2 <= value <= 100:
+        raise argparse.ArgumentTypeError("must be between 2 and 100")
+    return value
+
+
+def _food_count(text: str) -> int:
+    value = int(text)
+    if not 0 <= value <= 1000:
+        raise argparse.ArgumentTypeError("must be between 0 and 1000")
+    return value
+
+
 def _positive_int(text: str) -> int:
     value = int(text)
     if value < 1:
@@ -41,8 +55,8 @@ def _video_fps(text: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     board = argparse.ArgumentParser(add_help=False)
     board.add_argument("--arena", choices=sorted(ARENAS), default="cross")
-    board.add_argument("--size", type=int, default=31, help="board side in cells")
-    board.add_argument("--food", type=int, default=3, help="food items on the board")
+    board.add_argument("--size", type=_board_size, default=31, help="board side in cells")
+    board.add_argument("--food", type=_food_count, default=3, help="food items on the board")
     board.add_argument("--seed", type=int, default=0, help="food seed (watch/bench: first round)")
 
     rules = argparse.ArgumentParser(add_help=False)
@@ -114,23 +128,27 @@ def match_config(args: argparse.Namespace) -> MatchConfig:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else (sys.argv[1:] or ["play"]))
-    config = match_config(args)
-    if args.command == "bench":
-        factories = (AGENTS[args.agent_1], AGENTS[args.agent_2])
-        print(format_report(run_benchmark(config, args.games, factories)))
+    try:
+        config = match_config(args)
+        if args.command == "bench":
+            factories = (AGENTS[args.agent_1], AGENTS[args.agent_2])
+            print(format_report(run_benchmark(config, args.games, factories)))
+            return 0
+        if args.command == "record":
+            return _record(parser, args, replace(config, max_ticks=args.max_ticks))
+
+        from .view.app import ShowcaseOptions, run_app
+
+        if args.command == "watch":
+            agents = [AGENTS[args.agent_1](), AGENTS[args.agent_2]()]
+            showcase = ShowcaseOptions(rounds=args.rounds, restart_delay=args.delay_restart)
+            run_app(config, agents, tick_rate=args.tick_rate, cell=args.cell, showcase=showcase)
+        else:
+            run_app(config, [HumanController(), AggressiveAIController()], tick_rate=args.tick_rate, cell=args.cell)
         return 0
-    if args.command == "record":
-        return _record(parser, args, replace(config, max_ticks=args.max_ticks))
-
-    from .view.app import ShowcaseOptions, run_app
-
-    if args.command == "watch":
-        agents = [AGENTS[args.agent_1](), AGENTS[args.agent_2]()]
-        showcase = ShowcaseOptions(rounds=args.rounds, restart_delay=args.delay_restart)
-        run_app(config, agents, tick_rate=args.tick_rate, cell=args.cell, showcase=showcase)
-    else:
-        run_app(config, [HumanController(), AggressiveAIController()], tick_rate=args.tick_rate, cell=args.cell)
-    return 0
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 def _record(parser: argparse.ArgumentParser, args: argparse.Namespace, config: MatchConfig) -> int:
